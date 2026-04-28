@@ -1,0 +1,28 @@
+{
+  "name": "green-acress-backend",
+  "version": "1.0.0",
+  "description": "Este repositorio contiene el backend del proyecto.  \r Aquí se desarrollará la lógica del servidor, manejo de datos y APIs.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+      
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MauroGiaccobasso-Git/green-acress-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MauroGiaccobasso-Git/green-acress-backend/issues"
+  },
+  "homepage": "https://github.com/MauroGiaccobasso-Git/green-acress-backend#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
