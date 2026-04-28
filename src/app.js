@@ -9,7 +9,7 @@ const express = require("express");
 const homeRoutes = require("./routes/homeRoutes");
 const app = express();
 // Define el puerto donde va a correr el servidor
-const PORT = 3000;
+const PORT = 8080;
 // Permite manejar datos en formato JSON (por ejemplo en POST)
 app.use(express.json());
 // Conecta las rutas importadas al servidor.
