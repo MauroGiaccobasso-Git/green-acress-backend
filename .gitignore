@@ -1,3 +1,7 @@
+# Este archivo indica qué archivos y carpetas NO deben subirse al repositorio de Git.
+# Se utiliza para evitar subir dependencias (como node_modules), archivos temporales,
+# configuraciones locales y datos innecesarios que no forman parte del código fuente del proyecto.
+
 # Logs
 logs
 *.log
