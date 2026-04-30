@@ -1,0 +1,100 @@
+
+// Configuración del cliente Prisma
+// Define cómo Prisma va a generar el cliente que se usará en el backend
+generator client {
+  provider = "prisma-client-js" // Indica que el cliente será para Node.js (JavaScript)
+}
+
+// Configuración de la fuente de datos
+// Define el motor de base de datos utilizado por Prisma
+datasource db {
+  provider = "postgresql" // Especifica que usamos PostgreSQL como motor de base de datos
+}
+
+model Usuario {
+  id                Int      @id @default(autoincrement())
+  email             String   @unique
+  password_hash     String
+  rol               String
+  estado            String
+  intentos_fallidos Int      @default(0)
+  bloqueado_hasta   DateTime?
+  fecha_creacion    DateTime @default(now())
+  fecha_actualizacion DateTime @updatedAt
+
+  // Relación inversa con Socio
+// Indica que un Usuario puede tener un Socio asociado (solo si su rol es SOCIO)
+// Es opcional porque no todos los usuarios son socios (por ejemplo, administradores)
+  socio Socio?
+
+}
+model Socio {
+  id                  Int      @id @default(autoincrement())
+  usuario_id          Int      @unique
+  documento           String
+  nombre              String
+  apellido            String
+  telefono            String
+  estado              String
+  fecha_alta          DateTime @default(now())
+  consentimiento_aceptado Boolean @default(false)
+  fecha_consentimiento DateTime?
+  fecha_creacion      DateTime @default(now())
+  fecha_actualizacion DateTime @updatedAt
+
+// Define la relación entre Socio y Usuario
+// Indica que el campo usuario_id es una clave foránea que apunta al id del modelo Usuario
+  usuario Usuario @relation(fields: [usuario_id], references: [id])
+}
+
+model Producto {
+  id                Int      @id @default(autoincrement())
+  nombre            String
+  descripcion       String
+  tipo              String
+  unidad_medida     String
+  precio_venta_actual Float
+  estado            String
+  fecha_creacion    DateTime @default(now())
+  fecha_actualizacion DateTime @updatedAt
+}
+
+
+model Stock {
+  id                   Int      @id @default(autoincrement())
+  producto_id          Int      @unique
+  cantidad_total       Float
+  cantidad_reservada   Float    @default(0)
+  cantidad_disponible  Float
+  fecha_actualizacion  DateTime @updatedAt
+
+  // Relación con Producto
+// Cada registro de stock corresponde a un único producto
+// Se utiliza producto_id como clave foránea hacia Producto.id
+  producto Producto @relation(fields: [producto_id], references: [id])
+}
+
+model MovimientoStock {
+  id                Int      @id @default(autoincrement())
+  producto_id       Int
+  tipo              String
+  cantidad          Float
+  referencia_id     Int?
+  fecha_creacion    DateTime @default(now())
+
+  // Relación con Producto
+// Cada movimiento de stock corresponde a un producto
+// Se utiliza producto_id como clave foránea hacia Producto.id
+  producto Producto @relation(fields: [producto_id], references: [id])
+}
+
+model Proveedor {
+  id                  Int      @id @default(autoincrement())
+  nombre              String
+  contacto            String?
+  telefono            String?
+  email               String?
+  estado              String
+  fecha_creacion      DateTime @default(now())
+  fecha_actualizacion DateTime @updatedAt
+}

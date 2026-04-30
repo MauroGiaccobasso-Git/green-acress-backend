@@ -24,4 +24,4 @@ app.use("/", homeRoutes);
 app.listen(PORT, () => {
   // Muestra un mensaje en la consola indicando que el servidor está corriendo
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
-});
+});  
