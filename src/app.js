@@ -6,6 +6,7 @@ import express from "express";
 // permitiendo utilizarlas dentro del servidor principal
 import homeRoutes from "./routes/homeRoutes.js";
 import usuarioRoutes from "./routes/usuario.routes.js";
+import authRoutes from "./routes/authRoutes.js";
 const app = express();
 
 // Define el puerto donde va a correr el servidor
@@ -18,8 +19,10 @@ app.use(express.json());
 // Conecta las rutas importadas al servidor.
 // Indica que todas las solicitudes a "/" serán manejadas por homeRoutes
 // Indica que todas las solicitudes a "/usuarios" serán manejadas por usuarioRoutes
+// Indica que todas las solicitudes a "/auth" serán manejadas por authRoutes
 app.use("/", homeRoutes);
 app.use("/usuarios", usuarioRoutes);
+app.use("/auth", authRoutes);
 
 // Inicia el servidor y lo pone a escuchar en el puerto definido
 app.listen(PORT, () => {
