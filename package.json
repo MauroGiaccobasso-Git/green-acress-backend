@@ -2,6 +2,7 @@
   "name": "green-acress-backend",
   "version": "1.0.0",
   "description": "Este repositorio contiene el backend del proyecto.  \r Aquí se desarrollará la lógica del servidor, manejo de datos y APIs.",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node src/app.js",
@@ -19,9 +20,11 @@
   },
   "homepage": "https://github.com/MauroGiaccobasso-Git/green-acress-backend#readme",
   "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "pg": "^8.20.0",
     "prisma": "^7.8.0"
   },
   "devDependencies": {

@@ -1,17 +1,16 @@
 // Controlador de la ruta principal.
-// Este archivo contiene la lógica que maneja las solicitudes
-// hacia la ruta raíz ("/") y define la respuesta del servidor.
+// Este archivo contiene la lógica que maneja las solicitudes HTTP
+// hacia la ruta raíz ("/") y otras rutas de prueba.
+
 // Función que maneja la lógica de la ruta principal ("/")
-const getHome = (req, res) => {
-  // Envía una respuesta al navegador cuando alguien accede a la ruta "/"
+// Recibe la request (req) y envía una respuesta (res)
+export const getHome = (req, res) => {
+  // Envía una respuesta al cliente cuando accede a la ruta "/"
   res.send("Respuesta desde el controlador");
 };
-// Función para una ruta de prueba
-const getTest = (req, res) => {
-  res.send('Ruta de prueba funcionando');
-};
-// Exporta la función para poder usarla en otros archivos (por ejemplo en routes)
-module.exports = {
-  getHome,
-  getTest
+
+// Función que maneja una ruta de prueba
+// Permite validar que el backend está funcionando correctamente
+export const getTest = (req, res) => {
+  res.send("Ruta de prueba funcionando");
 };
