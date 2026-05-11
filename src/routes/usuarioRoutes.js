@@ -4,7 +4,7 @@ import express from "express";
 
 // Importa el controlador que contiene la lógica para manejar la request
 // En este caso, el controlador que obtiene los usuarios
-import { getUsuariosController } from "../controllers/usuario.controller.js";
+import { getUsuariosController } from "../controllers/usuarioController.js";
 
 // Crea una instancia de Router de Express
 // El Router permite agrupar rutas relacionadas en un módulo independiente

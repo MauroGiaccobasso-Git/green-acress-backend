@@ -1,6 +1,6 @@
 // Importa el servicio que contiene la lógica de acceso a la base de datos
 // En este caso, el servicio que obtiene todos los usuarios
-import { getUsuarios } from "../services/usuario.service.js";
+import { getUsuarios } from "../services/usuarioService.js";
 
 // Controller encargado de manejar la request HTTP
 // Recibe la solicitud (req) y construye la respuesta (res)

@@ -32,7 +32,7 @@ datasource db {
 model Socio {
   id                      Int            @id @default(autoincrement())
   usuario_id              Int            @unique
-  documento               String
+  documento               String         @unique
   nombre                  String
   apellido                String
   telefono                String
