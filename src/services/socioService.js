@@ -37,6 +37,20 @@ export const crearSocio = async (datosSocio) => {
     consentimiento_aceptado,
   } = datosSocio;
 
+  // Valida que los campos obligatorios estén presentes antes de continuar.
+  // Esto evita intentar crear usuarios o socios con información incompleta.
+  if (
+    !email ||
+    !password ||
+    !documento ||
+    !nombre ||
+    !apellido ||
+    !telefono ||
+    consentimiento_aceptado === undefined
+  ) {
+    throw new Error("Todos los campos obligatorios deben estar completos");
+  }
+
   // Valida si ya existe un socio con el mismo documento
   // Esto evita duplicar socios dentro del sistema
   const socioExistente = await prisma.socio.findUnique({
@@ -108,135 +122,4 @@ export const crearSocio = async (datosSocio) => {
 
   // Retorna el resultado final al controlador
   return nuevoSocio;
-};
-
-// Servicio encargado de actualizar los datos de un socio existente.
-// Centraliza las validaciones de negocio y la operación sobre la base de datos.
-export const actualizarSocio = async (id, datosSocio) => {
-  // Obtiene los datos enviados para actualizar el socio
-  const { documento, nombre, apellido, telefono, estado } = datosSocio;
-
-  // Busca el socio en la base de datos utilizando su ID
-  const socioExistente = await prisma.socio.findUnique({
-    where: { id },
-  });
-
-  // Valida que el socio exista antes de intentar modificarlo
-  if (!socioExistente) {
-    throw new Error("El socio indicado no existe");
-  }
-
-  // Si se envía un nuevo documento,
-  // se valida que no pertenezca a otro socio
-  if (documento && documento !== socioExistente.documento) {
-    const documentoDuplicado = await prisma.socio.findUnique({
-      where: { documento },
-    });
-
-    // Si ya existe otro socio con el mismo documento,
-    // se cancela la operación
-    if (documentoDuplicado) {
-      throw new Error("Ya existe un socio registrado con ese documento");
-    }
-  }
-
-  // Actualiza la información del socio en la base de datos
-  const socioActualizado = await prisma.socio.update({
-    where: { id },
-    data: {
-      documento,
-      nombre,
-      apellido,
-      telefono,
-      estado,
-    },
-
-    // Incluye información básica del usuario relacionado
-    include: {
-      usuario: {
-        select: {
-          id: true,
-          email: true,
-          rol: true,
-          estado: true,
-        },
-      },
-    },
-  });
-
-  // Retorna el socio actualizado
-  return socioActualizado;
-};
-
-// Servicio encargado de realizar la desactivación lógica de un socio.
-// La operación no elimina registros de la base de datos.
-// Cambia el estado del socio a INACTIVO y también desactiva
-// el usuario asociado para impedir el acceso al sistema.
-export const desactivarSocio = async (id) => {
-  // Busca el socio en la base de datos
-  const socioExistente = await prisma.socio.findUnique({
-    where: { id },
-  });
-
-  // Valida que el socio exista
-  if (!socioExistente) {
-    throw new Error("El socio indicado no existe");
-  }
-
-  // Valida que el socio no esté ya desactivado
-  if (socioExistente.estado === "INACTIVO") {
-    throw new Error("El socio ya se encuentra desactivado");
-  }
-
-  // Ejecuta la desactivación dentro de una transacción.
-  // Esto garantiza que se actualicen socio y usuario juntos.
-  const socioDesactivado = await prisma.$transaction(async (tx) => {
-    // Actualiza el estado del socio
-    const socioActualizado = await tx.socio.update({
-      where: { id },
-      data: {
-        estado: "INACTIVO",
-      },
-      include: {
-        usuario: {
-          select: {
-            id: true,
-            email: true,
-            rol: true,
-            estado: true,
-          },
-        },
-      },
-    });
-
-    // Actualiza el estado del usuario asociado
-    await tx.usuario.update({
-      where: {
-        id: socioExistente.usuario_id,
-      },
-      data: {
-        estado: "INACTIVO",
-      },
-    });
-
-    // Consulta nuevamente el socio para devolverlo
-    // con el usuario asociado ya actualizado
-    const socioConUsuarioActualizado = await tx.socio.findUnique({
-      where: { id },
-      include: {
-        usuario: {
-          select: {
-            id: true,
-            email: true,
-            rol: true,
-            estado: true,
-          },
-        },
-      },
-    });
-
-    return socioConUsuarioActualizado;
-  });
-
-  return socioDesactivado;
 };
