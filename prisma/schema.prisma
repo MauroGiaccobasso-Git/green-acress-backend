@@ -10,24 +10,30 @@ generator client {
 datasource db {
   provider = "postgresql" // Especifica que usamos PostgreSQL como motor de base de datos
 }
-  model Usuario {
-    id                  Int       @id @default(autoincrement())
-    email               String    @unique
-    password_hash       String
-    rol                 String
-    estado              String
-    intentos_fallidos   Int       @default(0)
-    bloqueado_hasta     DateTime?
-    fecha_creacion      DateTime  @default(now())
-    fecha_actualizacion DateTime  @updatedAt
-    ventas              Venta[]
-    reservas            Reserva[]
 
-    // Relación inversa con Socio
-    // Indica que un Usuario puede tener un Socio asociado (solo si su rol es SOCIO)
-    // Es opcional porque no todos los usuarios son socios (por ejemplo, administradores)
-    socio Socio?
-  }
+enum RolUsuario {
+  ADMIN
+  SOCIO
+}
+
+model Usuario {
+  id                  Int        @id @default(autoincrement())
+  email               String     @unique
+  password_hash       String
+  rol                 RolUsuario
+  estado              String
+  intentos_fallidos   Int        @default(0)
+  bloqueado_hasta     DateTime?
+  fecha_creacion      DateTime   @default(now())
+  fecha_actualizacion DateTime   @updatedAt
+  ventas              Venta[]
+  reservas            Reserva[]
+
+  // Relación inversa con Socio
+  // Indica que un Usuario puede tener un Socio asociado (solo si su rol es SOCIO)
+  // Es opcional porque no todos los usuarios son socios (por ejemplo, administradores)
+  socio Socio?
+}
 
 model Socio {
   id                      Int            @id @default(autoincrement())
