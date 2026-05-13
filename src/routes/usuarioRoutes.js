@@ -1,18 +1,33 @@
-// Importa el framework Express
-// Express permite definir rutas HTTP y manejar solicitudes del cliente
+// Importa el framework Express.
+// Express permite definir rutas HTTP y manejar solicitudes del cliente.
 import express from "express";
 
-// Importa el controlador que contiene la lógica para manejar la request
-// En este caso, el controlador que obtiene los usuarios
+// Importa el controlador que contiene la lógica para manejar la request.
 import { getUsuariosController } from "../controllers/usuarioController.js";
 
-// Crea una instancia de Router de Express
-// El Router permite agrupar rutas relacionadas en un módulo independiente
+// Importa los middlewares de autenticación y autorización.
+import {
+  verificarToken,
+  autorizarRoles,
+} from "../middlewares/authMiddleware.js";
+
+// Crea una instancia de Router de Express.
 const router = express.Router();
 
-// Define una ruta GET en la raíz de este router
-// Cuando se accede a esta ruta, se ejecuta el controlador getUsuariosController
-router.get("/", getUsuariosController);
+// GET /usuarios
+//
+// Ruta protegida para administración de usuarios.
+//
+// Flujo:
+// 1. Verifica que exista un token válido.
+// 2. Verifica que el usuario tenga rol ADMIN.
+// 3. Ejecuta el controller.
+router.get(
+  "/",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getUsuariosController
+);
 
-// Exporta el router para poder ser utilizado en la configuración principal del backend (app.js)
+// Exporta el router.
 export default router;

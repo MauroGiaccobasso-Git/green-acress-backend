@@ -123,3 +123,197 @@ export const crearSocio = async (datosSocio) => {
   // Retorna el resultado final al controlador
   return nuevoSocio;
 };
+// Servicio encargado de actualizar los datos de un socio existente.
+// Permite modificar información del socio y del usuario asociado.
+export const actualizarSocio = async (id, datosSocio) => {
+
+  // Convierte el id recibido desde la URL a número.
+  // Express recibe los parámetros como string.
+  const socioId = Number(id);
+
+  // Extrae los datos enviados desde el controller.
+  const { email, documento, nombre, apellido, telefono, estado } = datosSocio;
+
+  // Busca el socio en la base de datos junto con su usuario asociado.
+  // include permite traer la relación usuario.
+  const socioExistente = await prisma.socio.findUnique({
+    where: { id: socioId },
+    include: { usuario: true },
+  });
+
+  // Valida que el socio exista antes de continuar.
+  if (!socioExistente) {
+    throw new Error("El socio indicado no existe");
+  }
+
+  // Si el documento cambia,
+  // valida que no exista otro socio con el mismo documento.
+  if (documento && documento !== socioExistente.documento) {
+
+    const documentoExistente = await prisma.socio.findUnique({
+      where: { documento },
+    });
+
+    if (documentoExistente) {
+      throw new Error("Ya existe un socio registrado con ese documento");
+    }
+  }
+
+  // Si el email cambia,
+  // valida que no exista otro usuario con el mismo email.
+  if (email && email !== socioExistente.usuario.email) {
+
+    const emailExistente = await prisma.usuario.findUnique({
+      where: { email },
+    });
+
+    if (emailExistente) {
+      throw new Error("Ya existe un usuario registrado con ese email");
+    }
+  }
+
+  // Ejecuta la actualización dentro de una transacción.
+  // Esto garantiza consistencia entre Usuario y Socio.
+  const socioActualizado = await prisma.$transaction(async (tx) => {
+
+    // Si se recibió un nuevo email,
+    // actualiza también el usuario asociado.
+    if (email) {
+      await tx.usuario.update({
+        where: { id: socioExistente.usuario_id },
+        data: { email },
+      });
+    }
+
+    // Actualiza los datos del socio.
+    return await tx.socio.update({
+      where: { id: socioId },
+
+      data: {
+        documento,
+        nombre,
+        apellido,
+        telefono,
+        estado,
+
+        // Actualiza la fecha de modificación.
+        fecha_actualizacion: new Date(),
+      },
+
+      // Retorna también información básica del usuario asociado.
+      include: {
+        usuario: {
+          select: {
+            id: true,
+            email: true,
+            rol: true,
+            estado: true,
+          },
+        },
+      },
+    });
+  });
+
+  // Devuelve el socio actualizado.
+  return socioActualizado;
+};
+
+// Servicio encargado de desactivar lógicamente un socio.
+// No elimina datos de la base; únicamente cambia el estado.
+export const desactivarSocio = async (id) => {
+
+  // Convierte el id recibido desde la URL a número.
+  const socioId = Number(id);
+
+  // Busca el socio junto con el usuario relacionado.
+  const socioExistente = await prisma.socio.findUnique({
+    where: { id: socioId },
+    include: { usuario: true },
+  });
+
+  // Verifica que el socio exista.
+  if (!socioExistente) {
+    throw new Error("El socio indicado no existe");
+  }
+
+  // Ejecuta la desactivación dentro de una transacción.
+  // Esto evita inconsistencias entre Usuario y Socio.
+  const socioDesactivado = await prisma.$transaction(async (tx) => {
+
+    // Desactiva primero el usuario asociado.
+    // Esto impide futuros inicios de sesión.
+    await tx.usuario.update({
+      where: { id: socioExistente.usuario_id },
+
+      data: {
+        estado: "INACTIVO",
+        fecha_actualizacion: new Date(),
+      },
+    });
+
+    // Luego desactiva el socio.
+    return await tx.socio.update({
+      where: { id: socioId },
+
+      data: {
+        estado: "INACTIVO",
+
+        // Actualiza la fecha de modificación.
+        fecha_actualizacion: new Date(),
+      },
+
+      // Retorna datos básicos del usuario asociado.
+      include: {
+        usuario: {
+          select: {
+            id: true,
+            email: true,
+            rol: true,
+            estado: true,
+          },
+        },
+      },
+    });
+  });
+
+  // Devuelve el socio desactivado.
+  return socioDesactivado;
+};
+
+// Servicio encargado de obtener el perfil del socio autenticado.
+// Utiliza el usuario_id recibido desde el token JWT para buscar el socio asociado.
+export const obtenerPerfilSocio = async (usuarioId) => {
+  // Busca el socio vinculado al usuario autenticado.
+  const socio = await prisma.socio.findUnique({
+    where: {
+      usuario_id: usuarioId,
+    },
+    select: {
+      id: true,
+      documento: true,
+      nombre: true,
+      apellido: true,
+      telefono: true,
+      estado: true,
+      fecha_alta: true,
+      consentimiento_aceptado: true,
+      fecha_consentimiento: true,
+      usuario: {
+        select: {
+          id: true,
+          email: true,
+          rol: true,
+          estado: true,
+        },
+      },
+    },
+  });
+
+  // Si no existe un socio asociado al usuario,
+  // se informa el error al controller.
+  if (!socio) {
+    throw new Error("No existe un socio asociado al usuario autenticado");
+  }
+
+  return socio;
+};

@@ -17,11 +17,11 @@ const PORT = 8080;
 app.use(express.json());
 
 // Rutas
-// Conecta las rutas importadas al servidor.
 // Indica que todas las solicitudes a "/" serán manejadas por homeRoutes
 // Indica que todas las solicitudes a "/usuarios" serán manejadas por usuarioRoutes
 // Indica que todas las solicitudes a "/auth" serán manejadas por authRoutes
-app.use("/", homeRoutes);
+// Indica que todas las solicitudes a "/socios" serán manejadas por socioRoutes
+app.use("/", homeRoutes); 
 app.use("/usuarios", usuarioRoutes);  
 app.use("/auth", authRoutes);
 app.use("/socios", socioRoutes);
