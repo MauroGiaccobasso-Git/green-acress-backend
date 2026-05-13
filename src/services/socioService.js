@@ -236,6 +236,12 @@ export const desactivarSocio = async (id) => {
     throw new Error("El socio indicado no existe");
   }
 
+  // Verifica si el socio ya se encuentra desactivado.
+  // Evita ejecutar nuevamente una operación ya realizada.
+  if (socioExistente.estado === "INACTIVO") {
+    throw new Error("El socio ya se encuentra desactivado");
+  }
+
   // Ejecuta la desactivación dentro de una transacción.
   // Esto evita inconsistencias entre Usuario y Socio.
   const socioDesactivado = await prisma.$transaction(async (tx) => {
