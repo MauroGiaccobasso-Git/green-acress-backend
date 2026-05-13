@@ -1,6 +1,6 @@
 // Importa el servicio encargado de consultar los socios
 // El controlador delega la lógica de acceso a datos al service
-import { obtenerSocios, crearSocio, actualizarSocio, desactivarSocio } from "../services/socioService.js";
+import { obtenerSocios, crearSocio, actualizarSocio, desactivarSocio, obtenerPerfilSocio } from "../services/socioService.js";
 
 // Controlador encargado de manejar la request HTTP
 // para obtener la lista de socios registrados
@@ -103,3 +103,23 @@ export const desactivarSocioController = async (req, res) => {
     });
   }
 };
+
+// Controller encargado de devolver el perfil del socio autenticado.
+// Usa el id del usuario que fue cargado previamente por el middleware verificarToken.
+export const obtenerPerfilSocioController = async (req, res) => {
+  try {
+    const usuarioId = req.usuario.id;
+
+    const perfil = await obtenerPerfilSocio(usuarioId);
+
+    return res.status(200).json({
+      message: "Perfil del socio obtenido correctamente",
+      perfil,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      message: error.message,
+    });
+  }
+};
+
