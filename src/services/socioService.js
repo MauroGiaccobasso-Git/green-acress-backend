@@ -1,6 +1,13 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
-
+import {
+  validarEmail,
+  validarPassword,
+  validarDocumento,
+  validarTelefono,
+  validarTexto,
+  validarEstado,
+} from "../utils/validaciones.js";
 // Servicio encargado de obtener todos los socios registrados en el sistema
 // Esta función concentra la lógica de acceso a datos del módulo de socios
 export const obtenerSocios = async () => {
@@ -33,6 +40,31 @@ export const crearSocio = async (datosSocio) => {
   // Esto evita intentar crear usuarios o socios con información incompleta.
   if (!email || !password || !documento || !nombre || !apellido || !telefono) {
     throw new Error("Todos los campos obligatorios deben estar completos");
+  }
+
+  // Valida que el email tenga un formato correcto.
+  if (!validarEmail(email)) {
+    throw new Error("El formato del email no es válido");
+  }
+
+  // Valida que la contraseña tenga una longitud mínima segura.
+  if (!validarPassword(password)) {
+    throw new Error("La contraseña debe tener al menos 8 caracteres");
+  }
+
+  // Valida que el documento tenga un formato válido.
+  if (!validarDocumento(documento)) {
+    throw new Error("El documento ingresado no es válido");
+  }
+
+  // Valida que el teléfono tenga un formato válido.
+  if (!validarTelefono(telefono)) {
+    throw new Error("El teléfono ingresado no es válido");
+  }
+
+  // Valida nombre y apellido.
+  if (!validarTexto(nombre) || !validarTexto(apellido)) {
+    throw new Error("El nombre o apellido ingresado no es válido");
   }
 
   // Valida si ya existe un socio con el mismo documento
@@ -119,6 +151,34 @@ export const actualizarSocio = async (id, datosSocio) => {
 
   // Extrae los datos enviados desde el controller.
   const { email, documento, nombre, apellido, telefono, estado } = datosSocio;
+
+  // Valida email si fue enviado.
+  if (email && !validarEmail(email)) {
+    throw new Error("El formato del email no es válido");
+  }
+
+  // Valida documento si fue enviado.
+  if (documento && !validarDocumento(documento)) {
+    throw new Error("El documento ingresado no es válido");
+  }
+
+  // Valida teléfono si fue enviado.
+  if (telefono && !validarTelefono(telefono)) {
+    throw new Error("El teléfono ingresado no es válido");
+  }
+
+  // Valida nombre y apellido si fueron enviados.
+  if (
+    (nombre && !validarTexto(nombre)) ||
+    (apellido && !validarTexto(apellido))
+  ) {
+    throw new Error("El nombre o apellido ingresado no es válido");
+  }
+
+  // Valida estado si fue enviado.
+  if (estado && !validarEstado(estado)) {
+    throw new Error("El estado ingresado no es válido");
+  }
 
   // Busca el socio en la base de datos junto con su usuario asociado.
   // include permite traer la relación usuario.
