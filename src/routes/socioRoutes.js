@@ -8,6 +8,7 @@ import {
   actualizarSocioController,
   desactivarSocioController,
   obtenerPerfilSocioController,
+  aceptarConsentimientoSocio,
 } from "../controllers/socioController.js";
 
 // Importa los middlewares de autenticación y autorización
@@ -40,6 +41,15 @@ router.get(
   verificarToken,
   autorizarRoles("SOCIO"),
   obtenerPerfilSocioController,
+);
+
+// Ruta para que un socio autenticado acepte su consentimiento informado.
+// Usa el usuario_id del token, por eso no recibe id por URL.
+router.patch(
+  "/consentimiento",
+  verificarToken,
+  autorizarRoles("SOCIO"),
+  aceptarConsentimientoSocio
 );
 
 // Ruta PUT para actualizar un socio existente.
