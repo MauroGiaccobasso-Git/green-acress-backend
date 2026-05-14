@@ -27,27 +27,11 @@ export const obtenerSocios = async () => {
 // Esta función crea primero el Usuario con rol SOCIO y luego el Socio vinculado
 export const crearSocio = async (datosSocio) => {
   // Desestructura los datos enviados desde el controlador
-  const {
-    email,
-    password,
-    documento,
-    nombre,
-    apellido,
-    telefono,
-    consentimiento_aceptado,
-  } = datosSocio;
+  const { email, password, documento, nombre, apellido, telefono } = datosSocio;
 
   // Valida que los campos obligatorios estén presentes antes de continuar.
   // Esto evita intentar crear usuarios o socios con información incompleta.
-  if (
-    !email ||
-    !password ||
-    !documento ||
-    !nombre ||
-    !apellido ||
-    !telefono ||
-    consentimiento_aceptado === undefined
-  ) {
+  if (!email || !password || !documento || !nombre || !apellido || !telefono) {
     throw new Error("Todos los campos obligatorios deben estar completos");
   }
 
@@ -92,7 +76,9 @@ export const crearSocio = async (datosSocio) => {
       },
     });
 
-    // Crea el socio vinculado al usuario recién generado
+    // Crea el socio vinculado al usuario recién generado.
+    // El consentimiento queda pendiente hasta que el socio
+    // acepte los términos desde su propio acceso al sistema.
     const socioCreado = await tx.socio.create({
       data: {
         usuario_id: nuevoUsuario.id,
@@ -100,8 +86,8 @@ export const crearSocio = async (datosSocio) => {
         nombre,
         apellido,
         telefono,
-        consentimiento_aceptado,
-        fecha_consentimiento: consentimiento_aceptado ? new Date() : null,
+        consentimiento_aceptado: false,
+        fecha_consentimiento: null,
         estado: "ACTIVO",
       },
       include: {
@@ -123,10 +109,10 @@ export const crearSocio = async (datosSocio) => {
   // Retorna el resultado final al controlador
   return nuevoSocio;
 };
+
 // Servicio encargado de actualizar los datos de un socio existente.
 // Permite modificar información del socio y del usuario asociado.
 export const actualizarSocio = async (id, datosSocio) => {
-
   // Convierte el id recibido desde la URL a número.
   // Express recibe los parámetros como string.
   const socioId = Number(id);
@@ -149,7 +135,6 @@ export const actualizarSocio = async (id, datosSocio) => {
   // Si el documento cambia,
   // valida que no exista otro socio con el mismo documento.
   if (documento && documento !== socioExistente.documento) {
-
     const documentoExistente = await prisma.socio.findUnique({
       where: { documento },
     });
@@ -162,7 +147,6 @@ export const actualizarSocio = async (id, datosSocio) => {
   // Si el email cambia,
   // valida que no exista otro usuario con el mismo email.
   if (email && email !== socioExistente.usuario.email) {
-
     const emailExistente = await prisma.usuario.findUnique({
       where: { email },
     });
@@ -175,7 +159,6 @@ export const actualizarSocio = async (id, datosSocio) => {
   // Ejecuta la actualización dentro de una transacción.
   // Esto garantiza consistencia entre Usuario y Socio.
   const socioActualizado = await prisma.$transaction(async (tx) => {
-
     // Si se recibió un nuevo email,
     // actualiza también el usuario asociado.
     if (email) {
@@ -221,7 +204,6 @@ export const actualizarSocio = async (id, datosSocio) => {
 // Servicio encargado de desactivar lógicamente un socio.
 // No elimina datos de la base; únicamente cambia el estado.
 export const desactivarSocio = async (id) => {
-
   // Convierte el id recibido desde la URL a número.
   const socioId = Number(id);
 
@@ -245,7 +227,6 @@ export const desactivarSocio = async (id) => {
   // Ejecuta la desactivación dentro de una transacción.
   // Esto evita inconsistencias entre Usuario y Socio.
   const socioDesactivado = await prisma.$transaction(async (tx) => {
-
     // Desactiva primero el usuario asociado.
     // Esto impide futuros inicios de sesión.
     await tx.usuario.update({
@@ -322,4 +303,57 @@ export const obtenerPerfilSocio = async (usuarioId) => {
   }
 
   return socio;
+};
+
+// Servicio encargado de registrar la aceptación
+// del consentimiento informado por parte del socio.
+//
+// Esta operación solamente puede ser ejecutada
+// por un socio autenticado utilizando su propio token JWT.
+export const aceptarConsentimiento = async (usuarioId) => {
+  // Busca el socio asociado al usuario autenticado.
+  // usuarioId proviene del token JWT validado previamente
+  // por el middleware de autenticación.
+  const socio = await prisma.socio.findUnique({
+    where: {
+      usuario_id: usuarioId,
+    },
+  });
+
+  // Valida que exista un socio asociado al usuario autenticado.
+  // Esto evita inconsistencias o accesos inválidos.
+  if (!socio) {
+    throw new Error("No existe un socio asociado al usuario autenticado");
+  }
+
+  // Verifica si el consentimiento ya había sido aceptado anteriormente.
+  // Esto evita registrar múltiples aceptaciones innecesarias.
+  if (socio.consentimiento_aceptado) {
+    throw new Error("El consentimiento ya fue aceptado");
+  }
+
+  // Actualiza el consentimiento del socio.
+  // Se registra:
+  // - consentimiento_aceptado = true
+  // - fecha exacta de aceptación
+  // - fecha de actualización del registro
+  const socioActualizado = await prisma.socio.update({
+    where: {
+      id: socio.id,
+    },
+
+    data: {
+      consentimiento_aceptado: true,
+
+      // Registra la fecha y hora exacta
+      // en que el socio aceptó los términos.
+      fecha_consentimiento: new Date(),
+
+      // Actualiza la fecha general de modificación.
+      fecha_actualizacion: new Date(),
+    },
+  });
+
+  // Devuelve el socio actualizado al controller.
+  return socioActualizado;
 };

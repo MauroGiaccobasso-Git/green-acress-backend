@@ -5,7 +5,6 @@ import jwt from "jsonwebtoken";
 // Función principal de login.
 // Recibe email y password enviados desde el controller.
 export const loginUsuario = async (email, password) => {
-
   // Validación básica:
   // se verifica que ambos campos hayan sido enviados.
   if (!email || !password) {
@@ -16,6 +15,9 @@ export const loginUsuario = async (email, password) => {
   // El email se utiliza porque debe ser único dentro del sistema.
   const usuario = await prisma.usuario.findUnique({
     where: { email },
+    include: {
+      socio: true,
+    },
   });
 
   // Si no existe un usuario con ese email,
@@ -34,8 +36,8 @@ export const loginUsuario = async (email, password) => {
   // Validación de contraseña utilizando bcrypt.
   // Se compara la contraseña ingresada con el hash almacenado.
   const passwordValida = await bcrypt.compare(
-    password,                 // contraseña ingresada por el usuario
-    usuario.password_hash     // hash guardado en base de datos
+    password, // contraseña ingresada por el usuario
+    usuario.password_hash, // hash guardado en base de datos
   );
 
   // Si la contraseña no coincide,
@@ -43,6 +45,10 @@ export const loginUsuario = async (email, password) => {
   if (!passwordValida) {
     throw new Error("Contraseña incorrecta");
   }
+  // Determina si el usuario autenticado es socio
+  // y todavía tiene pendiente aceptar el consentimiento informado.
+  const requiereConsentimiento =
+    usuario.rol === "SOCIO" && usuario.socio?.consentimiento_aceptado === false;
 
   // Generación del token JWT.
   // El token contiene información mínima del usuario autenticado
@@ -60,7 +66,7 @@ export const loginUsuario = async (email, password) => {
     {
       // Tiempo de expiración configurado desde variables de entorno.
       expiresIn: process.env.JWT_EXPIRES_IN,
-    }
+    },
   );
 
   // Si todas las validaciones son correctas,
@@ -69,6 +75,8 @@ export const loginUsuario = async (email, password) => {
     message: "Login correcto",
 
     token,
+
+    requiereConsentimiento,
 
     usuario: {
       id: usuario.id,

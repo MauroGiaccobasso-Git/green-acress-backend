@@ -1,6 +1,13 @@
 // Importa el servicio encargado de consultar los socios
 // El controlador delega la lógica de acceso a datos al service
-import { obtenerSocios, crearSocio, actualizarSocio, desactivarSocio, obtenerPerfilSocio } from "../services/socioService.js";
+import {
+  obtenerSocios,
+  crearSocio,
+  actualizarSocio,
+  desactivarSocio,
+  obtenerPerfilSocio,
+  aceptarConsentimiento,
+} from "../services/socioService.js";
 
 // Controlador encargado de manejar la request HTTP
 // para obtener la lista de socios registrados
@@ -123,3 +130,23 @@ export const obtenerPerfilSocioController = async (req, res) => {
   }
 };
 
+// Controller encargado de registrar la aceptación
+// del consentimiento informado del socio autenticado.
+export const aceptarConsentimientoSocio = async (req, res) => {
+  try {
+    // El usuario_id se obtiene desde el token JWT,
+    // no desde parámetros enviados por el cliente.
+    const usuarioId = req.usuario.id;
+
+    const socioActualizado = await aceptarConsentimiento(usuarioId);
+
+    res.status(200).json({
+      message: "Consentimiento aceptado correctamente",
+      socio: socioActualizado,
+    });
+  } catch (error) {
+    res.status(400).json({
+      message: error.message,
+    });
+  }
+};
