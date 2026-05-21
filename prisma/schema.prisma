@@ -17,17 +17,18 @@ enum RolUsuario {
 }
 
 model Usuario {
-  id                  Int        @id @default(autoincrement())
-  email               String     @unique
+  id                  Int         @id @default(autoincrement())
+  email               String      @unique
   password_hash       String
   rol                 RolUsuario
   estado              String
-  intentos_fallidos   Int        @default(0)
+  intentos_fallidos   Int         @default(0)
   bloqueado_hasta     DateTime?
-  fecha_creacion      DateTime   @default(now())
-  fecha_actualizacion DateTime   @updatedAt
+  fecha_creacion      DateTime    @default(now())
+  fecha_actualizacion DateTime    @updatedAt
   ventas              Venta[]
   reservas            Reserva[]
+  auditorias          Auditoria[]
 
   // Relación inversa con Socio
   // Indica que un Usuario puede tener un Socio asociado (solo si su rol es SOCIO)
@@ -210,7 +211,8 @@ model Reserva {
 
   // Relación inversa con ReservaDetalle
   // Una reserva puede incluir múltiples productos
-  detalles ReservaDetalle[]
+  detalles  ReservaDetalle[]
+  historial HistorialReserva[]
 }
 
 model ReservaDetalle {
@@ -228,6 +230,28 @@ model ReservaDetalle {
   producto Producto @relation(fields: [producto_id], references: [id])
 }
 
+model HistorialReserva {
+  id            Int      @id @default(autoincrement())
+  reserva_id    Int
+  estado        String
+  fecha         DateTime @default(now())
+  observaciones String?
+
+  reserva Reserva @relation(fields: [reserva_id], references: [id])
+}
+
+model Auditoria {
+  id             Int      @id @default(autoincrement())
+  usuario_id     Int
+  accion         String
+  entidad        String
+  entidad_id     Int?
+  detalle        String?
+  fecha_creacion DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id])
+}
+
 model Notificacion {
   id             Int       @id @default(autoincrement())
   socio_id       Int?
@@ -235,6 +259,7 @@ model Notificacion {
   mensaje        String
   canal          String
   estado         String
+  origen_tipo    String?
   origen_id      Int?
   fecha_envio    DateTime?
   fecha_creacion DateTime  @default(now())
