@@ -1,14 +1,9 @@
-// Configuración del cliente Prisma
-// Define cómo Prisma va a generar el cliente que se usará en el backend
 generator client {
-  provider = "prisma-client-js" // Indica que el cliente será para Node.js (JavaScript)
+  provider = "prisma-client-js"
 }
 
-// Configuración de la fuente de datos
-// Define el motor de base de datos utilizado por Prisma
-// En Prisma 7, la URL de conexión se gestiona desde prisma.config.ts
 datasource db {
-  provider = "postgresql" // Especifica que usamos PostgreSQL como motor de base de datos
+  provider = "postgresql"
 }
 
 enum RolUsuario {
@@ -16,24 +11,75 @@ enum RolUsuario {
   SOCIO
 }
 
-model Usuario {
-  id                  Int         @id @default(autoincrement())
-  email               String      @unique
-  password_hash       String
-  rol                 RolUsuario
-  estado              String
-  intentos_fallidos   Int         @default(0)
-  bloqueado_hasta     DateTime?
-  fecha_creacion      DateTime    @default(now())
-  fecha_actualizacion DateTime    @updatedAt
-  ventas              Venta[]
-  reservas            Reserva[]
-  auditorias          Auditoria[]
+enum EstadoUsuario {
+  ACTIVO
+  INACTIVO
+  BLOQUEADO
+}
 
-  // Relación inversa con Socio
-  // Indica que un Usuario puede tener un Socio asociado (solo si su rol es SOCIO)
-  // Es opcional porque no todos los usuarios son socios (por ejemplo, administradores)
-  socio Socio?
+enum EstadoSocio {
+  ACTIVO
+  INACTIVO
+  SUSPENDIDO
+}
+
+enum EstadoProducto {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoProveedor {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoReserva {
+  PENDIENTE
+  CONFIRMADA
+  RECHAZADA
+  CANCELADA
+  VENCIDA
+  FINALIZADA
+}
+
+enum EstadoVenta {
+  COMPLETADA
+}
+
+enum EstadoCompra {
+  PENDIENTE
+  RECIBIDA
+  CANCELADA
+}
+
+enum EstadoNotificacion {
+  PENDIENTE
+  ENVIADA
+  ERROR
+}
+
+enum TipoMovimientoStock {
+  INGRESO
+  EGRESO
+  RESERVA
+  LIBERACION
+  AJUSTE
+}
+
+model Usuario {
+  id                  Int           @id @default(autoincrement())
+  email               String        @unique
+  password_hash       String
+  estado              EstadoUsuario
+  intentos_fallidos   Int           @default(0)
+  bloqueado_hasta     DateTime?
+  fecha_creacion      DateTime      @default(now())
+  fecha_actualizacion DateTime      @updatedAt
+  rol                 RolUsuario
+  auditorias          Auditoria[]
+  reservas            Reserva[]
+  socio               Socio?
+  ventas              Venta[]
 }
 
 model Socio {
@@ -43,43 +89,33 @@ model Socio {
   nombre                  String
   apellido                String
   telefono                String
-  estado                  String
+  estado                  EstadoSocio
   fecha_alta              DateTime       @default(now())
   consentimiento_aceptado Boolean        @default(false)
   fecha_consentimiento    DateTime?
   fecha_creacion          DateTime       @default(now())
   fecha_actualizacion     DateTime       @updatedAt
-  ventas                  Venta[]
-  reservas                Reserva[]
   notificaciones          Notificacion[]
-
-  // Define la relación entre Socio y Usuario
-  // Indica que el campo usuario_id es una clave foránea que apunta al id del modelo Usuario
-  usuario Usuario @relation(fields: [usuario_id], references: [id])
+  reservas                Reserva[]
+  usuario                 Usuario        @relation(fields: [usuario_id], references: [id])
+  ventas                  Venta[]
 }
 
 model Producto {
   id                  Int               @id @default(autoincrement())
   nombre              String
-  stock               Stock?
   descripcion         String
   tipo                String
   unidad_medida       String
   precio_venta_actual Float
-  estado              String
+  estado              EstadoProducto
   fecha_creacion      DateTime          @default(now())
   fecha_actualizacion DateTime          @updatedAt
-  // Relación inversa con CompraDetalle
-  // Un producto puede aparecer en múltiples compras
   compras_detalle     CompraDetalle[]
-  // Relación inversa con VentaDetalle
-  // Un producto puede aparecer en múltiples ventas
-  ventas_detalle      VentaDetalle[]
-  // Relación inversa con ReservaDetalle
-  // Un producto puede aparecer en múltiples reservas
-  reservas_detalle    ReservaDetalle[]
-  // Relación inversa con MovimientoStock
   movimientos_stock   MovimientoStock[]
+  reservas_detalle    ReservaDetalle[]
+  stock               Stock?
+  ventas_detalle      VentaDetalle[]
 }
 
 model Stock {
@@ -89,25 +125,17 @@ model Stock {
   cantidad_reservada  Float    @default(0)
   cantidad_disponible Float
   fecha_actualizacion DateTime @updatedAt
-
-  // Relación con Producto
-  // Cada registro de stock corresponde a un único producto
-  // Se utiliza producto_id como clave foránea hacia Producto.id
-  producto Producto @relation(fields: [producto_id], references: [id])
+  producto            Producto @relation(fields: [producto_id], references: [id])
 }
 
 model MovimientoStock {
   id             Int      @id @default(autoincrement())
   producto_id    Int
-  tipo           String
+  tipo           TipoMovimientoStock
   cantidad       Float
   referencia_id  Int?
   fecha_creacion DateTime @default(now())
-
-  // Relación con Producto
-  // Cada movimiento de stock corresponde a un producto
-  // Se utiliza producto_id como clave foránea hacia Producto.id
-  producto Producto @relation(fields: [producto_id], references: [id])
+  producto       Producto @relation(fields: [producto_id], references: [id])
 }
 
 model Proveedor {
@@ -116,128 +144,88 @@ model Proveedor {
   contacto            String?
   telefono            String?
   email               String?
-  estado              String
+  estado              EstadoProveedor
   fecha_creacion      DateTime @default(now())
   fecha_actualizacion DateTime @updatedAt
   compras             Compra[]
 }
 
 model Compra {
-  id                  Int      @id @default(autoincrement())
+  id                  Int             @id @default(autoincrement())
   proveedor_id        Int
-  fecha               DateTime @default(now())
-  estado              String
+  fecha               DateTime        @default(now())
+  estado              EstadoCompra
   observaciones       String?
-  fecha_creacion      DateTime @default(now())
-  fecha_actualizacion DateTime @updatedAt
-
-  // Relación con Proveedor
-  // Cada compra está asociada a un proveedor
-  proveedor Proveedor       @relation(fields: [proveedor_id], references: [id])
-  // Relación inversa con CompraDetalle
-  // Una compra puede tener varios productos asociados
-  detalles  CompraDetalle[]
+  fecha_creacion      DateTime        @default(now())
+  fecha_actualizacion DateTime        @updatedAt
+  proveedor           Proveedor       @relation(fields: [proveedor_id], references: [id])
+  detalles            CompraDetalle[]
 }
 
 model CompraDetalle {
-  id          Int   @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   compra_id   Int
   producto_id Int
   cantidad    Float
-
-  // Relación con Compra
-  // Cada detalle pertenece a una compra específica
-  compra Compra @relation(fields: [compra_id], references: [id])
-
-  // Relación con Producto
-  // Cada detalle corresponde a un producto comprado
-  producto Producto @relation(fields: [producto_id], references: [id])
+  compra      Compra   @relation(fields: [compra_id], references: [id])
+  producto    Producto @relation(fields: [producto_id], references: [id])
 }
 
 model Venta {
-  id                  Int      @id @default(autoincrement())
+  id                  Int            @id @default(autoincrement())
   socio_id            Int
   usuario_id          Int
-  fecha               DateTime @default(now())
-  estado              String
+  fecha               DateTime       @default(now())
+  estado              EstadoVenta
   observaciones       String?
-  fecha_creacion      DateTime @default(now())
-  fecha_actualizacion DateTime @updatedAt
-
-  // Relación con Socio
-  // La venta pertenece a un socio
-  socio Socio @relation(fields: [socio_id], references: [id])
-
-  // Relación con Usuario (admin)
-  // Permite saber qué usuario registró la venta
-  usuario Usuario @relation(fields: [usuario_id], references: [id])
-
-  // Relación inversa con VentaDetalle
-  // Una venta puede tener múltiples productos
-  detalles VentaDetalle[]
+  fecha_creacion      DateTime       @default(now())
+  fecha_actualizacion DateTime       @updatedAt
+  socio               Socio          @relation(fields: [socio_id], references: [id])
+  usuario             Usuario        @relation(fields: [usuario_id], references: [id])
+  detalles            VentaDetalle[]
 }
 
 model VentaDetalle {
-  id              Int   @id @default(autoincrement())
+  id              Int      @id @default(autoincrement())
   venta_id        Int
   producto_id     Int
   cantidad        Float
   precio_unitario Float
-
-  // Relación con Venta
-  venta Venta @relation(fields: [venta_id], references: [id])
-
-  // Relación con Producto
-  producto Producto @relation(fields: [producto_id], references: [id])
+  producto        Producto @relation(fields: [producto_id], references: [id])
+  venta           Venta    @relation(fields: [venta_id], references: [id])
 }
 
 model Reserva {
-  id                  Int      @id @default(autoincrement())
+  id                  Int                @id @default(autoincrement())
   socio_id            Int
   usuario_id          Int
-  fecha_solicitud     DateTime @default(now())
+  fecha_solicitud     DateTime           @default(now())
   fecha_limite_retiro DateTime
-  estado              String
+  estado              EstadoReserva
   observaciones       String?
-  fecha_actualizacion DateTime @updatedAt
-
-  // Relación con Socio
-  // La reserva pertenece a un socio
-  socio Socio @relation(fields: [socio_id], references: [id])
-
-  // Relación con Usuario
-  // Permite saber qué usuario creó o registró la reserva
-  usuario Usuario @relation(fields: [usuario_id], references: [id])
-
-  // Relación inversa con ReservaDetalle
-  // Una reserva puede incluir múltiples productos
-  detalles  ReservaDetalle[]
-  historial HistorialReserva[]
+  fecha_actualizacion DateTime           @updatedAt
+  historial           HistorialReserva[]
+  socio               Socio              @relation(fields: [socio_id], references: [id])
+  usuario             Usuario            @relation(fields: [usuario_id], references: [id])
+  detalles            ReservaDetalle[]
 }
 
 model ReservaDetalle {
-  id          Int   @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   reserva_id  Int
   producto_id Int
   cantidad    Float
-
-  // Relación con Reserva
-  // Cada detalle pertenece a una reserva específica
-  reserva Reserva @relation(fields: [reserva_id], references: [id])
-
-  // Relación con Producto
-  // Cada detalle corresponde a un producto reservado
-  producto Producto @relation(fields: [producto_id], references: [id])
+  producto    Producto @relation(fields: [producto_id], references: [id])
+  reserva     Reserva  @relation(fields: [reserva_id], references: [id])
 }
 
 model HistorialReserva {
   id            Int      @id @default(autoincrement())
   reserva_id    Int
-  estado        String
+  estado        EstadoReserva
   fecha         DateTime @default(now())
   observaciones String?
-
-  reserva Reserva @relation(fields: [reserva_id], references: [id])
+  reserva       Reserva  @relation(fields: [reserva_id], references: [id])
 }
 
 model Auditoria {
@@ -248,8 +236,7 @@ model Auditoria {
   entidad_id     Int?
   detalle        String?
   fecha_creacion DateTime @default(now())
-
-  usuario Usuario @relation(fields: [usuario_id], references: [id])
+  usuario        Usuario  @relation(fields: [usuario_id], references: [id])
 }
 
 model Notificacion {
@@ -258,13 +245,10 @@ model Notificacion {
   tipo           String
   mensaje        String
   canal          String
-  estado         String
-  origen_tipo    String?
+  estado         EstadoNotificacion
   origen_id      Int?
   fecha_envio    DateTime?
   fecha_creacion DateTime  @default(now())
-
-  // Relación con Socio
-  // La notificación puede estar asociada a un socio (opcional)
-  socio Socio? @relation(fields: [socio_id], references: [id])
+  origen_tipo    String?
+  socio          Socio?    @relation(fields: [socio_id], references: [id])
 }
