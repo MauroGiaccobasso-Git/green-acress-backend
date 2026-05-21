@@ -4,8 +4,8 @@ import {
   obtenerSocios,
   crearSocio,
   actualizarSocio,
-  desactivarSocio,
   obtenerPerfilSocio,
+  cambiarEstadoSocio,
   aceptarConsentimiento,
 } from "../services/socioService.js";
 
@@ -85,32 +85,6 @@ export const actualizarSocioController = async (req, res) => {
   }
 };
 
-// Controlador encargado de manejar la request HTTP
-// para desactivar lógicamente un socio
-export const desactivarSocioController = async (req, res) => {
-  try {
-    // Obtiene el ID enviado por parámetro
-    const { id } = req.params;
-
-    // Ejecuta el servicio encargado de desactivar el socio
-    const socioDesactivado = await desactivarSocio(Number(id));
-
-    // Respuesta exitosa
-    res.status(200).json({
-      message: "Socio desactivado correctamente",
-      socio: socioDesactivado,
-    });
-  } catch (error) {
-    // Debug en consola
-    console.error(error);
-
-    // Error controlado
-    res.status(400).json({
-      error: error.message,
-    });
-  }
-};
-
 // Controller encargado de devolver el perfil del socio autenticado.
 // Usa el id del usuario que fue cargado previamente por el middleware verificarToken.
 export const obtenerPerfilSocioController = async (req, res) => {
@@ -126,6 +100,31 @@ export const obtenerPerfilSocioController = async (req, res) => {
   } catch (error) {
     return res.status(400).json({
       message: error.message,
+    });
+  }
+};
+
+// Controller encargado de cambiar el estado de un socio.
+// Centraliza activación, desactivación y suspensión.
+export const cambiarEstadoSocioController = async (req, res) => {
+  try {
+    // Obtiene el id desde los parámetros de la URL.
+    const { id } = req.params;
+
+    // Obtiene el nuevo estado enviado en el body.
+    const { estado } = req.body;
+
+    // Ejecuta la lógica del service.
+    const socioActualizado = await cambiarEstadoSocio(id, estado);
+
+    // Retorna respuesta exitosa.
+    res.status(200).json({
+      message: "Estado del socio actualizado correctamente",
+      socio: socioActualizado,
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: error.message,
     });
   }
 };

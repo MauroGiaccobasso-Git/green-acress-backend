@@ -150,7 +150,7 @@ export const actualizarSocio = async (id, datosSocio) => {
   const socioId = Number(id);
 
   // Extrae los datos enviados desde el controller.
-  const { email, documento, nombre, apellido, telefono, estado } = datosSocio;
+  const { email, documento, nombre, apellido, telefono } = datosSocio;
 
   // Valida email si fue enviado.
   if (email && !validarEmail(email)) {
@@ -173,11 +173,6 @@ export const actualizarSocio = async (id, datosSocio) => {
     (apellido && !validarTexto(apellido))
   ) {
     throw new Error("El nombre o apellido ingresado no es válido");
-  }
-
-  // Valida estado si fue enviado.
-  if (estado && !validarEstado(estado)) {
-    throw new Error("El estado ingresado no es válido");
   }
 
   // Busca el socio en la base de datos junto con su usuario asociado.
@@ -237,7 +232,6 @@ export const actualizarSocio = async (id, datosSocio) => {
         nombre,
         apellido,
         telefono,
-        estado,
 
         // Actualiza la fecha de modificación.
         fecha_actualizacion: new Date(),
@@ -261,55 +255,88 @@ export const actualizarSocio = async (id, datosSocio) => {
   return socioActualizado;
 };
 
-// Servicio encargado de desactivar lógicamente un socio.
-// No elimina datos de la base; únicamente cambia el estado.
-export const desactivarSocio = async (id) => {
+// Servicio encargado de centralizar la lógica de cambio
+// de estado de socios dentro del sistema.
+//
+// Esta función permite manejar desde un único punto:
+// - activación;
+// - desactivación;
+// - suspensión.
+//
+// Además sincroniza automáticamente el estado
+// del usuario asociado según las reglas del negocio.
+export const cambiarEstadoSocio = async (id, nuevoEstado) => {
   // Convierte el id recibido desde la URL a número.
   const socioId = Number(id);
 
-  // Busca el socio junto con el usuario relacionado.
+  // Valida que el estado recibido sea válido.
+  // Esto evita registrar estados inexistentes.
+  if (!validarEstado(nuevoEstado)) {
+    throw new Error("El estado ingresado no es válido");
+  }
+
+  // Busca el socio junto con su usuario asociado.
+  // include permite acceder también al usuario relacionado.
   const socioExistente = await prisma.socio.findUnique({
     where: { id: socioId },
     include: { usuario: true },
   });
 
-  // Verifica que el socio exista.
+  // Verifica que el socio exista antes de continuar.
   if (!socioExistente) {
     throw new Error("El socio indicado no existe");
   }
 
-  // Verifica si el socio ya se encuentra desactivado.
-  // Evita ejecutar nuevamente una operación ya realizada.
-  if (socioExistente.estado === "INACTIVO") {
-    throw new Error("El socio ya se encuentra desactivado");
+  // Variable utilizada para resolver automáticamente
+  // el estado que tendrá el usuario asociado.
+  let estadoUsuario;
+
+  // Si el socio queda ACTIVO,
+  // el usuario también recupera acceso normal.
+  if (nuevoEstado === "ACTIVO") {
+    estadoUsuario = "ACTIVO";
   }
 
-  // Ejecuta la desactivación dentro de una transacción.
-  // Esto evita inconsistencias entre Usuario y Socio.
-  const socioDesactivado = await prisma.$transaction(async (tx) => {
-    // Desactiva primero el usuario asociado.
-    // Esto impide futuros inicios de sesión.
+  // Si el socio queda INACTIVO,
+  // el usuario también queda inactivo.
+  if (nuevoEstado === "INACTIVO") {
+    estadoUsuario = "INACTIVO";
+  }
+
+  // Si el socio queda SUSPENDIDO,
+  // el usuario asociado se bloquea.
+  if (nuevoEstado === "SUSPENDIDO") {
+    estadoUsuario = "BLOQUEADO";
+  }
+
+  // Ejecuta toda la operación dentro de una transacción.
+  // Esto garantiza consistencia entre Usuario y Socio.
+  const socioActualizado = await prisma.$transaction(async (tx) => {
+    // Actualiza primero el estado del usuario asociado.
     await tx.usuario.update({
       where: { id: socioExistente.usuario_id },
 
       data: {
-        estado: "INACTIVO",
+        estado: estadoUsuario,
+
+        // Registra fecha de actualización.
         fecha_actualizacion: new Date(),
       },
     });
 
-    // Luego desactiva el socio.
+    // Luego actualiza el estado del socio.
     return await tx.socio.update({
       where: { id: socioId },
 
       data: {
-        estado: "INACTIVO",
+        estado: nuevoEstado,
 
-        // Actualiza la fecha de modificación.
+        // Registra fecha de actualización.
         fecha_actualizacion: new Date(),
       },
 
-      // Retorna datos básicos del usuario asociado.
+      // Retorna también información básica
+      // del usuario asociado.
       include: {
         usuario: {
           select: {
@@ -323,8 +350,8 @@ export const desactivarSocio = async (id) => {
     });
   });
 
-  // Devuelve el socio desactivado.
-  return socioDesactivado;
+  // Devuelve el socio actualizado.
+  return socioActualizado;
 };
 
 // Servicio encargado de obtener el perfil del socio autenticado.
