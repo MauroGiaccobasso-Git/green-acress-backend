@@ -6,7 +6,7 @@ import {
   getSociosController,
   crearSocioController,
   actualizarSocioController,
-  desactivarSocioController,
+  cambiarEstadoSocioController,
   obtenerPerfilSocioController,
   aceptarConsentimientoSocio,
 } from "../controllers/socioController.js";
@@ -61,14 +61,14 @@ router.put(
   actualizarSocioController,
 );
 
-// Ruta PATCH para desactivar lógicamente un socio.
-// No elimina registros de la base de datos.
-// Solo cambia el estado a INACTIVO.
+// Ruta PATCH para cambiar el estado de un socio.
+// Centraliza activación, desactivación y suspensión.
+// También sincroniza el estado del usuario asociado.
 router.patch(
-  "/:id/desactivar",
+  "/:id/estado",
   verificarToken,
   autorizarRoles("ADMIN"),
-  desactivarSocioController,
+  cambiarEstadoSocioController,
 );
 
 // Exporta el router para utilizarlo en app.js

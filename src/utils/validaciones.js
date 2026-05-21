@@ -51,7 +51,7 @@ export const validarTexto = (texto) => {
 export const validarEstado = (estado) => {
 
   // Estados válidos definidos para usuarios y socios.
-  const estadosValidos = ["ACTIVO", "INACTIVO"];
+  const estadosValidos = ["ACTIVO", "INACTIVO", "SUSPENDIDO"];
 
   return estadosValidos.includes(estado);
 };
