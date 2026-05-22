@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { AppError } from "../utils/appError.js";
 
 // Función principal de login.
 // Recibe email y password enviados desde el controller.
@@ -8,7 +9,7 @@ export const loginUsuario = async (email, password) => {
   // Validación básica:
   // se verifica que ambos campos hayan sido enviados.
   if (!email || !password) {
-    throw new Error("Email y contraseña son obligatorios");
+    throw new AppError("Email y contraseña son obligatorios", 400);
   }
 
   // Busca el usuario en la base de datos utilizando Prisma.
@@ -23,14 +24,14 @@ export const loginUsuario = async (email, password) => {
   // Si no existe un usuario con ese email,
   // se corta el flujo de autenticación.
   if (!usuario) {
-    throw new Error("Usuario no encontrado");
+    throw new AppError("Usuario no encontrado", 401);
   }
 
   // Valida que el usuario se encuentre ACTIVO.
   // Aunque las credenciales sean correctas,
   // un usuario INACTIVO no puede acceder al sistema.
   if (usuario.estado !== "ACTIVO") {
-    throw new Error("El usuario se encuentra inactivo");
+    throw new AppError("El usuario se encuentra inactivo", 403);
   }
 
   // Validación de contraseña utilizando bcrypt.
@@ -43,7 +44,7 @@ export const loginUsuario = async (email, password) => {
   // Si la contraseña no coincide,
   // se corta el flujo de autenticación.
   if (!passwordValida) {
-    throw new Error("Contraseña incorrecta");
+    throw new AppError("Contraseña incorrecta", 401);
   }
   // Determina si el usuario autenticado es socio
   // y todavía tiene pendiente aceptar el consentimiento informado.

@@ -8,8 +8,8 @@ export const login = async (req, res) => {
 
     return res.status(200).json(resultado);
   } catch (error) {
-    return res.status(400).json({
-      message: error.message,
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Error interno del servidor",
     });
   }
 };
