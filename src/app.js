@@ -8,6 +8,7 @@ import homeRoutes from "./routes/homeRoutes.js";
 import usuarioRoutes from "./routes/usuarioRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import socioRoutes from "./routes/socioRoutes.js";
+import { errorHandler } from "./middlewares/errorHandler.js";
 const app = express();
 
 // Define el puerto donde va a correr el servidor
@@ -25,6 +26,7 @@ app.use("/", homeRoutes);
 app.use("/usuarios", usuarioRoutes);  
 app.use("/auth", authRoutes);
 app.use("/socios", socioRoutes);
+app.use(errorHandler);
 
 // Inicia el servidor y lo pone a escuchar en el puerto definido
 app.listen(PORT, () => {

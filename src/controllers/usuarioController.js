@@ -1,29 +1,24 @@
-// Importa el servicio que contiene la lógica de acceso a la base de datos.
-// En este caso, el servicio permite obtener usuarios y aplicar búsqueda.
+// Importa el servicio que contiene la lógica de consulta de usuarios.
 import { getUsuarios } from "../services/usuarioService.js";
 
-// Controller encargado de manejar la request HTTP.
-// Recibe la solicitud (req) y construye la respuesta (res).
-export const getUsuariosController = async (req, res) => {
-  try {
-    // Obtiene el parámetro opcional "search" desde la URL.
-    // Ejemplo: GET /usuarios?search=juan
-    const { search } = req.query;
+// Importa el wrapper reutilizable para capturar errores async
+// y derivarlos automáticamente al middleware global errorHandler.
+import { asyncHandler } from "../utils/asyncHandler.js";
 
-    // Llama al servicio y le envía el texto de búsqueda.
-    // Si search viene vacío, el service devuelve todos los usuarios.
-    const usuarios = await getUsuarios(search);
+// Controller encargado de manejar la consulta administrativa de usuarios.
+// Se mantiene simple: recibe datos de la request, delega al service y responde.
+export const getUsuariosController = asyncHandler(async (req, res) => {
+  // Obtiene el parámetro opcional "search" desde la URL.
+  // Ejemplo: GET /usuarios?search=juan
+  const { search } = req.query;
 
-    // Retorna una respuesta JSON más clara y consistente.
-    res.status(200).json({
-      message: "Usuarios obtenidos correctamente",
-      usuarios,
-    });
-  } catch (error) {
-    // En caso de error, retorna un status 500.
-    res.status(500).json({
-      message: "Error al obtener usuarios",
-      error: error.message,
-    });
-  }
-};
+  // Llama al servicio y le envía el texto de búsqueda.
+  // Si search viene vacío, el service devuelve todos los usuarios.
+  const usuarios = await getUsuarios(search);
+
+  // Retorna una respuesta JSON clara y consistente.
+  return res.status(200).json({
+    message: "Usuarios obtenidos correctamente",
+    usuarios,
+  });
+});
