@@ -5,6 +5,8 @@ import express from "express";
 import {
   getProductosController,
   crearProductoController,
+  actualizarProductoController,
+  desactivarProductoController,
 } from "../controllers/productoController.js";
 
 // Importa los middlewares de autenticación y autorización
@@ -23,7 +25,6 @@ router.get(
   verificarToken,
   autorizarRoles("ADMIN"),
   getProductosController,
-  
 );
 
 // Ruta protegida para registrar nuevos productos.
@@ -32,7 +33,23 @@ router.post(
   "/",
   verificarToken,
   autorizarRoles("ADMIN"),
-  crearProductoController
+  crearProductoController,
+);
+
+// Ruta protegida para actualizar productos existentes.
+// Solo los usuarios con rol ADMIN pueden modificar productos.
+router.put(
+  "/:id",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  actualizarProductoController,
+);
+
+router.patch(
+  "/:id/desactivar",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  desactivarProductoController,
 );
 
 // Exporta el router para utilizarlo en app.js

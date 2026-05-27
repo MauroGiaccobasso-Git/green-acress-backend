@@ -1,6 +1,8 @@
 import {
   obtenerProductos,
   crearProducto,
+  actualizarProducto,
+  desactivarProducto,
 } from "../services/productoService.js";
 
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -23,5 +25,23 @@ export const crearProductoController = asyncHandler(async (req, res) => {
   return res.status(201).json({
     message: "Producto creado correctamente",
     producto: nuevoProducto,
+  });
+});
+
+export const actualizarProductoController = asyncHandler(async (req, res) => {
+  const productoActualizado = await actualizarProducto(req.params.id, req.body);
+
+  res.status(200).json({
+    message: "Producto actualizado correctamente",
+    producto: productoActualizado,
+  });
+});
+
+export const desactivarProductoController = asyncHandler(async (req, res) => {
+  const producto = await desactivarProducto(req.params.id);
+
+  res.status(200).json({
+    message: "Producto desactivado correctamente",
+    producto,
   });
 });
