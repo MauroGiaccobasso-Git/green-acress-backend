@@ -28,6 +28,22 @@ enum EstadoProducto {
   INACTIVO
 }
 
+enum TipoProducto {
+  FLOR
+  SEMILLA
+}
+
+enum UnidadMedida {
+  GRAMOS
+  UNIDADES
+}
+
+enum GeneticaProducto {
+  INDICA
+  SATIVA
+  HIBRIDA
+}
+
 enum EstadoProveedor {
   ACTIVO
   INACTIVO
@@ -43,13 +59,13 @@ enum EstadoReserva {
 }
 
 enum EstadoVenta {
-  COMPLETADA
+  REGISTRADA
+  ANULADA
 }
 
 enum EstadoCompra {
-  PENDIENTE
-  RECIBIDA
-  CANCELADA
+  REGISTRADA
+  ANULADA
 }
 
 enum EstadoNotificacion {
@@ -62,7 +78,7 @@ enum TipoMovimientoStock {
   INGRESO
   EGRESO
   RESERVA
-  LIBERACION
+  LIBERACION_RESERVA
   AJUSTE
 }
 
@@ -70,7 +86,7 @@ model Usuario {
   id                  Int           @id @default(autoincrement())
   email               String        @unique
   password_hash       String
-  estado              EstadoUsuario
+  estado              EstadoUsuario @default(ACTIVO)
   intentos_fallidos   Int           @default(0)
   bloqueado_hasta     DateTime?
   fecha_creacion      DateTime      @default(now())
@@ -89,7 +105,7 @@ model Socio {
   nombre                  String
   apellido                String
   telefono                String
-  estado                  EstadoSocio
+  estado                  EstadoSocio    @default(ACTIVO)
   fecha_alta              DateTime       @default(now())
   consentimiento_aceptado Boolean        @default(false)
   fecha_consentimiento    DateTime?
@@ -104,11 +120,13 @@ model Socio {
 model Producto {
   id                  Int               @id @default(autoincrement())
   nombre              String
-  descripcion         String
-  tipo                String
-  unidad_medida       String
+  descripcion         String?
+  tipo                TipoProducto
+  genetica            GeneticaProducto?
+  porcentaje_thc      Float?
+  unidad_medida       UnidadMedida
   precio_venta_actual Float
-  estado              EstadoProducto
+  estado              EstadoProducto    @default(ACTIVO)
   fecha_creacion      DateTime          @default(now())
   fecha_actualizacion DateTime          @updatedAt
   compras_detalle     CompraDetalle[]
@@ -121,32 +139,32 @@ model Producto {
 model Stock {
   id                  Int      @id @default(autoincrement())
   producto_id         Int      @unique
-  cantidad_total      Float
+  cantidad_total      Float    @default(0)
   cantidad_reservada  Float    @default(0)
-  cantidad_disponible Float
+  cantidad_disponible Float    @default(0)
   fecha_actualizacion DateTime @updatedAt
   producto            Producto @relation(fields: [producto_id], references: [id])
 }
 
 model MovimientoStock {
-  id             Int      @id @default(autoincrement())
+  id             Int                 @id @default(autoincrement())
   producto_id    Int
   tipo           TipoMovimientoStock
   cantidad       Float
   referencia_id  Int?
-  fecha_creacion DateTime @default(now())
-  producto       Producto @relation(fields: [producto_id], references: [id])
+  fecha_creacion DateTime            @default(now())
+  producto       Producto            @relation(fields: [producto_id], references: [id])
 }
 
 model Proveedor {
-  id                  Int      @id @default(autoincrement())
+  id                  Int             @id @default(autoincrement())
   nombre              String
   contacto            String?
   telefono            String?
   email               String?
-  estado              EstadoProveedor
-  fecha_creacion      DateTime @default(now())
-  fecha_actualizacion DateTime @updatedAt
+  estado              EstadoProveedor @default(ACTIVO)
+  fecha_creacion      DateTime        @default(now())
+  fecha_actualizacion DateTime        @updatedAt
   compras             Compra[]
 }
 
@@ -154,7 +172,7 @@ model Compra {
   id                  Int             @id @default(autoincrement())
   proveedor_id        Int
   fecha               DateTime        @default(now())
-  estado              EstadoCompra
+  estado              EstadoCompra    @default(REGISTRADA)
   observaciones       String?
   fecha_creacion      DateTime        @default(now())
   fecha_actualizacion DateTime        @updatedAt
@@ -176,7 +194,7 @@ model Venta {
   socio_id            Int
   usuario_id          Int
   fecha               DateTime       @default(now())
-  estado              EstadoVenta
+  estado              EstadoVenta    @default(REGISTRADA)
   observaciones       String?
   fecha_creacion      DateTime       @default(now())
   fecha_actualizacion DateTime       @updatedAt
@@ -201,7 +219,7 @@ model Reserva {
   usuario_id          Int
   fecha_solicitud     DateTime           @default(now())
   fecha_limite_retiro DateTime
-  estado              EstadoReserva
+  estado              EstadoReserva      @default(PENDIENTE)
   observaciones       String?
   fecha_actualizacion DateTime           @updatedAt
   historial           HistorialReserva[]
@@ -220,12 +238,12 @@ model ReservaDetalle {
 }
 
 model HistorialReserva {
-  id            Int      @id @default(autoincrement())
+  id            Int           @id @default(autoincrement())
   reserva_id    Int
   estado        EstadoReserva
-  fecha         DateTime @default(now())
+  fecha         DateTime      @default(now())
   observaciones String?
-  reserva       Reserva  @relation(fields: [reserva_id], references: [id])
+  reserva       Reserva       @relation(fields: [reserva_id], references: [id])
 }
 
 model Auditoria {
@@ -240,15 +258,15 @@ model Auditoria {
 }
 
 model Notificacion {
-  id             Int       @id @default(autoincrement())
+  id             Int                @id @default(autoincrement())
   socio_id       Int?
   tipo           String
   mensaje        String
   canal          String
-  estado         EstadoNotificacion
+  estado         EstadoNotificacion @default(PENDIENTE)
   origen_id      Int?
   fecha_envio    DateTime?
-  fecha_creacion DateTime  @default(now())
+  fecha_creacion DateTime           @default(now())
   origen_tipo    String?
-  socio          Socio?    @relation(fields: [socio_id], references: [id])
+  socio          Socio?             @relation(fields: [socio_id], references: [id])
 }

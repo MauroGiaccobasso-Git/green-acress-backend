@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
+import { AppError } from "../utils/appError.js";
 import {
   validarEmail,
   validarPassword,
@@ -39,32 +40,35 @@ export const crearSocio = async (datosSocio) => {
   // Valida que los campos obligatorios estén presentes antes de continuar.
   // Esto evita intentar crear usuarios o socios con información incompleta.
   if (!email || !password || !documento || !nombre || !apellido || !telefono) {
-    throw new Error("Todos los campos obligatorios deben estar completos");
+    throw new AppError(
+      "Todos los campos obligatorios deben estar completos",
+      400,
+    );
   }
 
   // Valida que el email tenga un formato correcto.
   if (!validarEmail(email)) {
-    throw new Error("El formato del email no es válido");
+    throw new AppError("El formato del email no es válido", 400);
   }
 
   // Valida que la contraseña tenga una longitud mínima segura.
   if (!validarPassword(password)) {
-    throw new Error("La contraseña debe tener al menos 8 caracteres");
+    throw new AppError("La contraseña debe tener al menos 8 caracteres", 400);
   }
 
   // Valida que el documento tenga un formato válido.
   if (!validarDocumento(documento)) {
-    throw new Error("El documento ingresado no es válido");
+    throw new AppError("El documento ingresado no es válido", 400);
   }
 
   // Valida que el teléfono tenga un formato válido.
   if (!validarTelefono(telefono)) {
-    throw new Error("El teléfono ingresado no es válido");
+    throw new AppError("El teléfono ingresado no es válido", 400);
   }
 
   // Valida nombre y apellido.
   if (!validarTexto(nombre) || !validarTexto(apellido)) {
-    throw new Error("El nombre o apellido ingresado no es válido");
+    throw new AppError("El nombre o apellido ingresado no es válido", 400);
   }
 
   // Valida si ya existe un socio con el mismo documento
@@ -76,7 +80,7 @@ export const crearSocio = async (datosSocio) => {
   });
 
   if (socioExistente) {
-    throw new Error("Ya existe un socio registrado con ese documento");
+    throw new AppError("Ya existe un socio registrado con ese documento", 409);
   }
 
   // Valida si ya existe un usuario con el mismo email
@@ -88,7 +92,7 @@ export const crearSocio = async (datosSocio) => {
   });
 
   if (usuarioExistente) {
-    throw new Error("Ya existe un usuario registrado con ese email");
+    throw new AppError("Ya existe un usuario registrado con ese email", 409);
   }
 
   // Genera un hash seguro de la contraseña antes de guardarla
@@ -104,7 +108,6 @@ export const crearSocio = async (datosSocio) => {
         email,
         password_hash: passwordHash,
         rol: "SOCIO",
-        estado: "ACTIVO",
       },
     });
 
@@ -119,8 +122,6 @@ export const crearSocio = async (datosSocio) => {
         apellido,
         telefono,
         consentimiento_aceptado: false,
-        fecha_consentimiento: null,
-        estado: "ACTIVO",
       },
       include: {
         usuario: {
@@ -154,17 +155,17 @@ export const actualizarSocio = async (id, datosSocio) => {
 
   // Valida email si fue enviado.
   if (email && !validarEmail(email)) {
-    throw new Error("El formato del email no es válido");
+    throw new AppError("El formato del email no es válido", 400);
   }
 
   // Valida documento si fue enviado.
   if (documento && !validarDocumento(documento)) {
-    throw new Error("El documento ingresado no es válido");
+    throw new AppError("El documento ingresado no es válido", 400);
   }
 
   // Valida teléfono si fue enviado.
   if (telefono && !validarTelefono(telefono)) {
-    throw new Error("El teléfono ingresado no es válido");
+    throw new AppError("El teléfono ingresado no es válido", 400);
   }
 
   // Valida nombre y apellido si fueron enviados.
@@ -172,7 +173,7 @@ export const actualizarSocio = async (id, datosSocio) => {
     (nombre && !validarTexto(nombre)) ||
     (apellido && !validarTexto(apellido))
   ) {
-    throw new Error("El nombre o apellido ingresado no es válido");
+    throw new AppError("El nombre o apellido ingresado no es válido", 400);
   }
 
   // Busca el socio en la base de datos junto con su usuario asociado.
@@ -184,7 +185,7 @@ export const actualizarSocio = async (id, datosSocio) => {
 
   // Valida que el socio exista antes de continuar.
   if (!socioExistente) {
-    throw new Error("El socio indicado no existe");
+    throw new AppError("El socio indicado no existe", 404);
   }
 
   // Si el documento cambia,
@@ -195,7 +196,10 @@ export const actualizarSocio = async (id, datosSocio) => {
     });
 
     if (documentoExistente) {
-      throw new Error("Ya existe un socio registrado con ese documento");
+      throw new AppError(
+        "Ya existe un socio registrado con ese documento",
+        409,
+      );
     }
   }
 
@@ -207,7 +211,7 @@ export const actualizarSocio = async (id, datosSocio) => {
     });
 
     if (emailExistente) {
-      throw new Error("Ya existe un usuario registrado con ese email");
+      throw new AppError("Ya existe un usuario registrado con ese email", 409);
     }
   }
 
@@ -272,7 +276,7 @@ export const cambiarEstadoSocio = async (id, nuevoEstado) => {
   // Valida que el estado recibido sea válido.
   // Esto evita registrar estados inexistentes.
   if (!validarEstado(nuevoEstado)) {
-    throw new Error("El estado ingresado no es válido");
+    throw new AppError("El estado ingresado no es válido", 400);
   }
 
   // Busca el socio junto con su usuario asociado.
@@ -284,7 +288,7 @@ export const cambiarEstadoSocio = async (id, nuevoEstado) => {
 
   // Verifica que el socio exista antes de continuar.
   if (!socioExistente) {
-    throw new Error("El socio indicado no existe");
+    throw new AppError("El socio indicado no existe", 404);
   }
 
   // Variable utilizada para resolver automáticamente
@@ -386,7 +390,10 @@ export const obtenerPerfilSocio = async (usuarioId) => {
   // Si no existe un socio asociado al usuario,
   // se informa el error al controller.
   if (!socio) {
-    throw new Error("No existe un socio asociado al usuario autenticado");
+    throw new AppError(
+      "No existe un socio asociado al usuario autenticado",
+      404,
+    );
   }
 
   return socio;
@@ -410,13 +417,16 @@ export const aceptarConsentimiento = async (usuarioId) => {
   // Valida que exista un socio asociado al usuario autenticado.
   // Esto evita inconsistencias o accesos inválidos.
   if (!socio) {
-    throw new Error("No existe un socio asociado al usuario autenticado");
+    throw new AppError(
+      "No existe un socio asociado al usuario autenticado",
+      404,
+    );
   }
 
   // Verifica si el consentimiento ya había sido aceptado anteriormente.
   // Esto evita registrar múltiples aceptaciones innecesarias.
   if (socio.consentimiento_aceptado) {
-    throw new Error("El consentimiento ya fue aceptado");
+    throw new AppError("El consentimiento ya fue aceptado", 409);
   }
 
   // Actualiza el consentimiento del socio.
