@@ -2,14 +2,79 @@ import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
 
 /**
- * Obtiene todos los productos registrados en el sistema.
- * Incluye el stock asociado para mostrar información de inventario.
+ * Obtiene productos registrados permitiendo búsqueda opcional
+ * para facilitar la gestión administrativa del inventario.
  */
-export const obtenerProductos = async () => {
+export const obtenerProductos = async (search = "") => {
+  // Elimina espacios sobrantes enviados en la búsqueda.
+  const searchNormalizado = search.trim();
+
+  // Convierte búsqueda a mayúsculas para comparar enums.
+  const searchEnum = searchNormalizado.toUpperCase();
+
+  // Si existe búsqueda, inicialmente se busca por campos de texto.
+  const filtros = searchNormalizado
+    ? [
+        // Permite buscar coincidencias parciales por nombre.
+        {
+          nombre: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+
+        // Permite buscar coincidencias parciales por descripción.
+        {
+          descripcion: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+      ]
+    : [];
+
+  // Si la búsqueda coincide con tipos válidos,
+  // agrega filtro por tipo de producto.
+  if (["FLOR", "SEMILLA"].includes(searchEnum)) {
+    filtros.push({
+      tipo: {
+        equals: searchEnum,
+      },
+    });
+  }
+
+  // Si la búsqueda coincide con genéticas válidas,
+  // agrega filtro por genética.
+  if (["INDICA", "SATIVA", "HIBRIDA"].includes(searchEnum)) {
+    filtros.push({
+      genetica: {
+        equals: searchEnum,
+      },
+    });
+  }
+
+  // Si la búsqueda coincide con estados válidos,
+  // agrega filtro por estado.
+  if (["ACTIVO", "INACTIVO"].includes(searchEnum)) {
+    filtros.push({
+      estado: {
+        equals: searchEnum,
+      },
+    });
+  }
+
+  // Consulta productos aplicando filtros opcionales.
   const productos = await prisma.producto.findMany({
+    // Si existen filtros se aplican.
+    // Si no existen, retorna todos los productos.
+    where: filtros.length > 0 ? { OR: filtros } : undefined,
+
+    // Incluye información de stock asociada.
     include: {
       stock: true,
     },
+
+    // Ordena resultados por identificador ascendente.
     orderBy: {
       id: "asc",
     },
@@ -17,7 +82,6 @@ export const obtenerProductos = async () => {
 
   return productos;
 };
-
 /*
   Determina automáticamente la unidad de medida según el tipo de producto.
 
