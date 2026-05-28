@@ -7,9 +7,13 @@ import {
 
 import { asyncHandler } from "../utils/asyncHandler.js";
 
-// Controller encargado de obtener todos los productos registrados.
+// Obtiene productos registrados permitiendo aplicar búsqueda opcional para gestión administrativa.
 export const getProductosController = asyncHandler(async (req, res) => {
-  const productos = await obtenerProductos();
+  // Obtiene búsqueda opcional enviada mediante query params.
+  const { search } = req.query;
+
+  // Consulta productos registrados aplicando filtro opcional.
+  const productos = await obtenerProductos(search);
 
   return res.status(200).json(productos);
 });
