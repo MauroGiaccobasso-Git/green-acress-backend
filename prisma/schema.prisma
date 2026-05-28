@@ -156,17 +156,17 @@ model MovimientoStock {
   producto       Producto            @relation(fields: [producto_id], references: [id])
 }
 
-model Proveedor {
-  id                  Int             @id @default(autoincrement())
-  nombre              String
-  contacto            String?
-  telefono            String?
-  email               String?
-  estado              EstadoProveedor @default(ACTIVO)
-  fecha_creacion      DateTime        @default(now())
-  fecha_actualizacion DateTime        @updatedAt
-  compras             Compra[]
-}
+  model Proveedor {
+    id                  Int             @id @default(autoincrement())
+    nombre              String
+    contacto            String?
+    telefono            String?
+    email               String?
+    estado              EstadoProveedor @default(ACTIVO)
+    fecha_creacion      DateTime        @default(now())
+    fecha_actualizacion DateTime        @updatedAt
+    compras             Compra[]
+  }
 
 model Compra {
   id                  Int             @id @default(autoincrement())
