@@ -6,7 +6,7 @@ import {
   getProductosController,
   crearProductoController,
   actualizarProductoController,
-  desactivarProductoController,
+  actualizarEstadoProductoController,
 } from "../controllers/productoController.js";
 
 // Importa los middlewares de autenticación y autorización
@@ -45,11 +45,13 @@ router.put(
   actualizarProductoController,
 );
 
+// Ruta protegida para cambiar el estado lógico de un producto.
+// Permite activar o desactivar productos sin eliminarlos físicamente.
 router.patch(
-  "/:id/desactivar",
+  "/:id/estado",
   verificarToken,
   autorizarRoles("ADMIN"),
-  desactivarProductoController,
+  actualizarEstadoProductoController,
 );
 
 // Exporta el router para utilizarlo en app.js

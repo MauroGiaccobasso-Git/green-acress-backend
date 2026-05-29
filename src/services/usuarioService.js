@@ -1,16 +1,24 @@
 import prisma from "../config/prisma.js";
 
+/* =========================================================
+   VALIDACIONES GENERALES
+========================================================= */
+
+// Normaliza búsqueda para evitar inconsistencias.
+const normalizarBusqueda = (search) => search.trim();
+
+/* =========================================================
+   CRUD PRINCIPAL
+========================================================= */
+
 /**
- * Obtiene usuarios registrados en el sistema.
- * Permite aplicar búsqueda administrativa por email o datos del socio asociado.
+ * Obtiene usuarios del sistema.
+ * Permite búsqueda por email o datos del socio asociado.
  * No expone información sensible como password_hash.
  */
 export const getUsuarios = async (search = "") => {
-  // Normaliza el criterio de búsqueda para evitar espacios accidentales.
-  const searchNormalizado = search.trim();
+  const searchNormalizado = normalizarBusqueda(search);
 
-  // Si se recibe un criterio de búsqueda, se filtra por email
-  // o por datos principales del socio asociado al usuario.
   const where = searchNormalizado
     ? {
         OR: [
@@ -47,10 +55,9 @@ export const getUsuarios = async (search = "") => {
       }
     : {};
 
-  // Select explícito para controlar qué información devuelve el endpoint
-  // y evitar exponer datos sensibles del usuario.
   return prisma.usuario.findMany({
     where,
+
     select: {
       id: true,
       email: true,
@@ -71,21 +78,10 @@ export const getUsuarios = async (search = "") => {
       },
     },
 
-    // Orden estable para que la respuesta sea consistente.
     orderBy: [
-      {
-        socio: {
-          apellido: "asc",
-        },
-      },
-      {
-        socio: {
-          nombre: "asc",
-        },
-      },
-      {
-        id: "asc",
-      },
+      { socio: { apellido: "asc" } },
+      { socio: { nombre: "asc" } },
+      { id: "asc" },
     ],
   });
 };

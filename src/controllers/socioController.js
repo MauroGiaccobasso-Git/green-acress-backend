@@ -1,7 +1,7 @@
 // Importa los servicios encargados de la lógica de negocio de socios.
 // El controller no accede directamente a la base de datos.
 import {
-  obtenerSocios,
+  getSocios ,
   crearSocio,
   actualizarSocio,
   obtenerPerfilSocio,
@@ -18,7 +18,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 export const getSociosController = asyncHandler(async (req, res) => {
   const { search } = req.query;
 
-  const socios = await obtenerSocios(search);
+  const socios = await getSocios (search);
 
   return res.status(200).json(socios);
 });
