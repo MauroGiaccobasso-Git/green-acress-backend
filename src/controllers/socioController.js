@@ -14,8 +14,11 @@ import {
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 // Controller encargado de obtener la lista de socios registrados.
+// Obtiene socios registrados permitiendo aplicar búsqueda opcional para gestión administrativa.
 export const getSociosController = asyncHandler(async (req, res) => {
-  const socios = await obtenerSocios();
+  const { search } = req.query;
+
+  const socios = await obtenerSocios(search);
 
   return res.status(200).json(socios);
 });
