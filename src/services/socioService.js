@@ -11,10 +11,58 @@ import {
 } from "../utils/validaciones.js";
 // Servicio encargado de obtener todos los socios registrados en el sistema
 // Esta función concentra la lógica de acceso a datos del módulo de socios
-export const obtenerSocios = async () => {
-  // Consulta la tabla Socio utilizando Prisma ORM
-  // include permite traer también la información básica del usuario asociado
+// Servicio encargado de obtener socios registrados en el sistema.
+// Permite aplicar una búsqueda opcional para facilitar la gestión administrativa.
+export const obtenerSocios = async (search = "") => {
+  const searchNormalizado = search.trim();
+  const searchEnum = searchNormalizado.toUpperCase();
+
+  const filtros = searchNormalizado
+    ? [
+        {
+          nombre: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          apellido: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          documento: {
+            contains: searchNormalizado,
+          },
+        },
+        {
+          telefono: {
+            contains: searchNormalizado,
+          },
+        },
+        {
+          usuario: {
+            email: {
+              contains: searchNormalizado,
+              mode: "insensitive",
+            },
+          },
+        },
+      ]
+    : [];
+
+  if (["ACTIVO", "INACTIVO", "SUSPENDIDO"].includes(searchEnum)) {
+    filtros.push({
+      estado: {
+        equals: searchEnum,
+      },
+    });
+  }
+
   const socios = await prisma.socio.findMany({
+    where: filtros.length > 0 ? { OR: filtros } : undefined,
+
     include: {
       usuario: {
         select: {
@@ -25,9 +73,12 @@ export const obtenerSocios = async () => {
         },
       },
     },
+
+    orderBy: {
+      id: "asc",
+    },
   });
 
-  // Devuelve la lista de socios al controlador
   return socios;
 };
 
