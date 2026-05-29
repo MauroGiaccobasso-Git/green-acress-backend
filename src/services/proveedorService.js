@@ -2,63 +2,43 @@ import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
 import { validarEmail, validarTelefono } from "../utils/validaciones.js";
 
-// Obtiene proveedores registrados permitiendo búsqueda opcional
-// para facilitar la gestión administrativa.
-export const obtenerProveedores = async (search = "") => {
-  // Normaliza el criterio recibido para evitar espacios accidentales.
-  const searchNormalizado = search.trim();
+/* =========================================================
+   VALIDACIONES GENERALES
+========================================================= */
 
-  // Construye filtros dinámicos solamente si existe búsqueda.
-  const where = searchNormalizado
-    ? {
-        OR: [
-          {
-            nombre: {
-              contains: searchNormalizado,
-              mode: "insensitive",
-            },
-          },
-          {
-            contacto: {
-              contains: searchNormalizado,
-              mode: "insensitive",
-            },
-          },
-          {
-            telefono: {
-              contains: searchNormalizado,
-              mode: "insensitive",
-            },
-          },
-          {
-            email: {
-              contains: searchNormalizado,
-              mode: "insensitive",
-            },
-          },
-        ],
-      }
-    : {};
+// Convierte y valida ID de proveedor.
+const validarIdProveedor = (id) => {
+  const proveedorId = Number(id);
 
-  return prisma.proveedor.findMany({
-    where,
+  if (!Number.isInteger(proveedorId) || proveedorId <= 0) {
+    throw new AppError("El id del proveedor es inválido", 400);
+  }
 
-    // Mantiene orden estable para facilitar lectura administrativa.
-    orderBy: [
-      {
-        nombre: "asc",
-      },
-      {
-        contacto: "asc",
-      },
-      {
-        id: "asc",
-      },
-    ],
-  });
+  return proveedorId;
 };
 
-// Valida un campo obligatorio reutilizando un mensaje específico.
+/* =========================================================
+   HELPERS DE BÚSQUEDA
+========================================================= */
+
+// Obtiene proveedor o lanza error si no existe.
+const obtenerProveedorPorId = async (proveedorId) => {
+  const proveedor = await prisma.proveedor.findUnique({
+    where: { id: proveedorId },
+  });
+
+  if (!proveedor) {
+    throw new AppError("El proveedor indicado no existe", 404);
+  }
+
+  return proveedor;
+};
+
+/* =========================================================
+   VALIDACIONES DE CAMPOS
+========================================================= */
+
+// Valida campos obligatorios.
 const validarCampoObligatorio = (valor, mensaje) => {
   if (!valor || valor.trim() === "") {
     throw new AppError(mensaje, 400);
@@ -71,35 +51,32 @@ const validarDatosObligatoriosProveedor = ({
   telefono,
   email,
 }) => {
-  // Valida los datos mínimos requeridos para registrar o actualizar proveedor.
   validarCampoObligatorio(nombre, "El nombre del proveedor es obligatorio");
   validarCampoObligatorio(contacto, "El contacto del proveedor es obligatorio");
   validarCampoObligatorio(telefono, "El teléfono del proveedor es obligatorio");
   validarCampoObligatorio(email, "El email del proveedor es obligatorio");
 };
 
+// Valida formato email/teléfono.
 const validarFormatoProveedor = ({ telefono, email }) => {
-  // Reutiliza validaciones genéricas centralizadas en utils.
   if (!validarTelefono(telefono)) {
-    throw new AppError(
-      "El teléfono del proveedor no tiene un formato válido",
-      400,
-    );
+    throw new AppError("El teléfono no es válido", 400);
   }
 
   if (!validarEmail(email)) {
-    throw new AppError(
-      "El email del proveedor no tiene un formato válido",
-      400,
-    );
+    throw new AppError("El email no es válido", 400);
   }
 };
 
+/* =========================================================
+   VALIDACIONES DE NEGOCIO
+========================================================= */
+
+// Evita duplicados de nombre o email.
 const validarProveedorDuplicado = async (
   { nombre, email },
   proveedorId = null,
 ) => {
-  // Busca proveedores existentes con el mismo nombre o email.
   const where = {
     OR: [
       { nombre: { equals: nombre, mode: "insensitive" } },
@@ -107,26 +84,38 @@ const validarProveedorDuplicado = async (
     ],
   };
 
-  // En actualización se excluye el proveedor actual para no compararlo consigo mismo.
   if (proveedorId) {
-    where.NOT = {
-      id: proveedorId,
-    };
+    where.NOT = { id: proveedorId };
   }
 
-  const proveedorExistente = await prisma.proveedor.findFirst({
-    where,
-  });
+  const existe = await prisma.proveedor.findFirst({ where });
 
-  if (proveedorExistente) {
-    throw new AppError(
-      "Ya existe un proveedor registrado con ese nombre o email",
-      409,
-    );
+  if (existe) {
+    throw new AppError("Ya existe un proveedor con ese nombre o email", 409);
   }
 };
 
-// Normaliza los datos del proveedor antes de persistir para evitar espacios inválidos.
+// Valida estado permitido.
+const validarEstadoProveedor = (estado) => {
+  const estadosPermitidos = ["ACTIVO", "INACTIVO"];
+
+  if (!estadosPermitidos.includes(estado)) {
+    throw new AppError("El estado del proveedor no es válido", 400);
+  }
+};
+
+// Evita updates redundantes de estado.
+const validarCambioEstadoProveedor = (estadoActual, nuevoEstado) => {
+  if (estadoActual === nuevoEstado) {
+    throw new AppError("El proveedor ya se encuentra en ese estado", 400);
+  }
+};
+
+/* =========================================================
+   TRANSFORMACIÓN DE DATOS
+========================================================= */
+
+// Normaliza datos antes de persistir.
 const construirDatosProveedor = ({ nombre, contacto, telefono, email }) => ({
   nombre: nombre.trim(),
   contacto: contacto.trim(),
@@ -134,43 +123,38 @@ const construirDatosProveedor = ({ nombre, contacto, telefono, email }) => ({
   email: email.trim(),
 });
 
+/* =========================================================
+   CRUD PRINCIPAL
+========================================================= */
+
+export const obtenerProveedores = async (search = "") => {
+  const searchNormalizado = search.trim();
+
+  const where = searchNormalizado
+    ? {
+        OR: [
+          { nombre: { contains: searchNormalizado, mode: "insensitive" } },
+          { contacto: { contains: searchNormalizado, mode: "insensitive" } },
+          { telefono: { contains: searchNormalizado, mode: "insensitive" } },
+          { email: { contains: searchNormalizado, mode: "insensitive" } },
+        ],
+      }
+    : {};
+
+  return prisma.proveedor.findMany({
+    where,
+    orderBy: [{ nombre: "asc" }, { contacto: "asc" }, { id: "asc" }],
+  });
+};
+
 export const crearProveedor = async (datosProveedor) => {
-  // Orquesta validaciones y persistencia sin mezclar responsabilidades.
   validarDatosObligatoriosProveedor(datosProveedor);
   validarFormatoProveedor(datosProveedor);
   await validarProveedorDuplicado(datosProveedor);
 
-  const datosNormalizados = construirDatosProveedor(datosProveedor);
+  const data = construirDatosProveedor(datosProveedor);
 
-  return prisma.proveedor.create({
-    data: datosNormalizados,
-  });
-};
-
-// Convierte y valida el identificador recibido por parámetro.
-const validarIdProveedor = (id) => {
-  const proveedorId = Number(id);
-
-  if (!Number.isInteger(proveedorId) || proveedorId <= 0) {
-    throw new AppError("El id del proveedor es inválido", 400);
-  }
-
-  return proveedorId;
-};
-
-// Obtiene un proveedor existente o corta el flujo con error controlado.
-const obtenerProveedorPorId = async (proveedorId) => {
-  const proveedor = await prisma.proveedor.findUnique({
-    where: {
-      id: proveedorId,
-    },
-  });
-
-  if (!proveedor) {
-    throw new AppError("El proveedor indicado no existe", 404);
-  }
-
-  return proveedor;
+  return prisma.proveedor.create({ data });
 };
 
 export const actualizarProveedor = async (id, datosProveedor) => {
@@ -182,34 +166,17 @@ export const actualizarProveedor = async (id, datosProveedor) => {
   validarFormatoProveedor(datosProveedor);
   await validarProveedorDuplicado(datosProveedor, proveedorId);
 
-  const datosNormalizados = construirDatosProveedor(datosProveedor);
+  const data = construirDatosProveedor(datosProveedor);
 
   return prisma.proveedor.update({
-    where: {
-      id: proveedorId,
-    },
-    data: datosNormalizados,
+    where: { id: proveedorId },
+    data,
   });
 };
 
-// Valida que el estado enviado pertenezca a los estados permitidos.
-const validarEstadoProveedor = (estado) => {
-  const estadosPermitidos = ["ACTIVO", "INACTIVO"];
-
-  if (!estadosPermitidos.includes(estado)) {
-    throw new AppError("El estado del proveedor no es válido", 400);
-  }
-};
-
-// Evita ejecutar actualizaciones innecesarias si el estado no cambia.
-const validarCambioEstadoProveedor = (estadoActual, nuevoEstado) => {
-  if (estadoActual === nuevoEstado) {
-    throw new AppError(
-      "El proveedor ya se encuentra en el estado indicado",
-      400,
-    );
-  }
-};
+/* =========================================================
+   CAMBIO DE ESTADO
+========================================================= */
 
 export const actualizarEstadoProveedor = async (id, nuevoEstado) => {
   const proveedorId = validarIdProveedor(id);
@@ -221,11 +188,7 @@ export const actualizarEstadoProveedor = async (id, nuevoEstado) => {
   validarCambioEstadoProveedor(proveedor.estado, nuevoEstado);
 
   return prisma.proveedor.update({
-    where: {
-      id: proveedorId,
-    },
-    data: {
-      estado: nuevoEstado,
-    },
+    where: { id: proveedorId },
+    data: { estado: nuevoEstado },
   });
 };

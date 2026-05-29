@@ -1,8 +1,8 @@
 import {
-  obtenerProductos,
+  getProductos,
   crearProducto,
   actualizarProducto,
-  desactivarProducto,
+  actualizarEstadoProducto,
 } from "../services/productoService.js";
 
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -13,7 +13,7 @@ export const getProductosController = asyncHandler(async (req, res) => {
   const { search } = req.query;
 
   // Consulta productos registrados aplicando filtro opcional.
-  const productos = await obtenerProductos(search);
+  const productos = await getProductos(search);
 
   return res.status(200).json(productos);
 });
@@ -41,11 +41,17 @@ export const actualizarProductoController = asyncHandler(async (req, res) => {
   });
 });
 
-export const desactivarProductoController = asyncHandler(async (req, res) => {
-  const producto = await desactivarProducto(req.params.id);
+// Permite modificar el estado lógico de un producto existente.
+export const actualizarEstadoProductoController = asyncHandler(
+  async (req, res) => {
+    const producto = await actualizarEstadoProducto(
+      req.params.id,
+      req.body.estado,
+    );
 
-  res.status(200).json({
-    message: "Producto desactivado correctamente",
-    producto,
-  });
-});
+    res.status(200).json({
+      message: "Estado del producto actualizado correctamente",
+      producto,
+    });
+  },
+);
