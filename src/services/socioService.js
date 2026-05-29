@@ -82,14 +82,16 @@ export const obtenerSocios = async (search = "") => {
   return socios;
 };
 
-// Servicio encargado de registrar un nuevo socio junto con su usuario asociado
-// Esta función crea primero el Usuario con rol SOCIO y luego el Socio vinculado
-export const crearSocio = async (datosSocio) => {
-  // Desestructura los datos enviados desde el controlador
-  const { email, password, documento, nombre, apellido, telefono } = datosSocio;
-
-  // Valida que los campos obligatorios estén presentes antes de continuar.
-  // Esto evita intentar crear usuarios o socios con información incompleta.
+// Valida los datos obligatorios y formatos necesarios para registrar un socio.
+// Reutiliza las validaciones generales del sistema.
+const validarDatosCreacionSocio = ({
+  email,
+  password,
+  documento,
+  nombre,
+  apellido,
+  telefono,
+}) => {
   if (!email || !password || !documento || !nombre || !apellido || !telefono) {
     throw new AppError(
       "Todos los campos obligatorios deben estar completos",
@@ -97,30 +99,32 @@ export const crearSocio = async (datosSocio) => {
     );
   }
 
-  // Valida que el email tenga un formato correcto.
   if (!validarEmail(email)) {
     throw new AppError("El formato del email no es válido", 400);
   }
 
-  // Valida que la contraseña tenga una longitud mínima segura.
   if (!validarPassword(password)) {
     throw new AppError("La contraseña debe tener al menos 8 caracteres", 400);
   }
 
-  // Valida que el documento tenga un formato válido.
   if (!validarDocumento(documento)) {
     throw new AppError("El documento ingresado no es válido", 400);
   }
 
-  // Valida que el teléfono tenga un formato válido.
   if (!validarTelefono(telefono)) {
     throw new AppError("El teléfono ingresado no es válido", 400);
   }
 
-  // Valida nombre y apellido.
   if (!validarTexto(nombre) || !validarTexto(apellido)) {
     throw new AppError("El nombre o apellido ingresado no es válido", 400);
   }
+};
+
+// Servicio encargado de registrar un nuevo socio junto con su usuario asociado
+// Esta función crea primero el Usuario con rol SOCIO y luego el Socio vinculado
+export const crearSocio = async (datosSocio) => {
+  validarDatosCreacionSocio(datosSocio);
+  const { email, password, documento, nombre, apellido, telefono } = datosSocio;
 
   // Valida si ya existe un socio con el mismo documento
   // Esto evita duplicar socios dentro del sistema
@@ -194,83 +198,114 @@ export const crearSocio = async (datosSocio) => {
   return nuevoSocio;
 };
 
-// Servicio encargado de actualizar los datos de un socio existente.
-// Permite modificar información del socio y del usuario asociado.
-export const actualizarSocio = async (id, datosSocio) => {
-  // Convierte el id recibido desde la URL a número.
-  // Express recibe los parámetros como string.
+// Convierte y valida el identificador recibido por parámetro.
+// Evita consultar la base de datos con ids inválidos.
+const validarIdSocio = (id) => {
   const socioId = Number(id);
 
-  // Extrae los datos enviados desde el controller.
-  const { email, documento, nombre, apellido, telefono } = datosSocio;
+  if (!Number.isInteger(socioId) || socioId <= 0) {
+    throw new AppError("El id del socio es inválido", 400);
+  }
 
-  // Valida email si fue enviado.
+  return socioId;
+};
+
+// Obtiene un socio existente junto con su usuario asociado.
+// Centraliza la validación de existencia.
+const obtenerSocioPorId = async (socioId) => {
+  const socio = await prisma.socio.findUnique({
+    where: {
+      id: socioId,
+    },
+    include: {
+      usuario: true,
+    },
+  });
+
+  if (!socio) {
+    throw new AppError("El socio indicado no existe", 404);
+  }
+
+  return socio;
+};
+
+// Valida únicamente los campos enviados durante una actualización.
+// Permite modificaciones parciales manteniendo reglas de negocio.
+const validarDatosActualizacionSocio = ({
+  email,
+  documento,
+  nombre,
+  apellido,
+  telefono,
+}) => {
   if (email && !validarEmail(email)) {
     throw new AppError("El formato del email no es válido", 400);
   }
 
-  // Valida documento si fue enviado.
   if (documento && !validarDocumento(documento)) {
     throw new AppError("El documento ingresado no es válido", 400);
   }
 
-  // Valida teléfono si fue enviado.
   if (telefono && !validarTelefono(telefono)) {
     throw new AppError("El teléfono ingresado no es válido", 400);
   }
 
-  // Valida nombre y apellido si fueron enviados.
   if (
     (nombre && !validarTexto(nombre)) ||
     (apellido && !validarTexto(apellido))
   ) {
     throw new AppError("El nombre o apellido ingresado no es válido", 400);
   }
+};
 
-  // Busca el socio en la base de datos junto con su usuario asociado.
-  // include permite traer la relación usuario.
-  const socioExistente = await prisma.socio.findUnique({
-    where: { id: socioId },
-    include: { usuario: true },
+// Valida que no exista otro socio con el mismo documento.
+const validarDocumentoDuplicadoSocio = async (documento, socioExistente) => {
+  if (!documento || documento === socioExistente.documento) {
+    return;
+  }
+
+  const documentoExistente = await prisma.socio.findUnique({
+    where: { documento },
   });
 
-  // Valida que el socio exista antes de continuar.
-  if (!socioExistente) {
-    throw new AppError("El socio indicado no existe", 404);
+  if (documentoExistente) {
+    throw new AppError("Ya existe un socio registrado con ese documento", 409);
+  }
+};
+
+// Valida que no exista otro usuario con el mismo email.
+const validarEmailDuplicadoUsuario = async (email, socioExistente) => {
+  if (!email || email === socioExistente.usuario.email) {
+    return;
   }
 
-  // Si el documento cambia,
-  // valida que no exista otro socio con el mismo documento.
-  if (documento && documento !== socioExistente.documento) {
-    const documentoExistente = await prisma.socio.findUnique({
-      where: { documento },
-    });
+  const emailExistente = await prisma.usuario.findUnique({
+    where: { email },
+  });
 
-    if (documentoExistente) {
-      throw new AppError(
-        "Ya existe un socio registrado con ese documento",
-        409,
-      );
-    }
+  if (emailExistente) {
+    throw new AppError("Ya existe un usuario registrado con ese email", 409);
   }
+};
 
-  // Si el email cambia,
-  // valida que no exista otro usuario con el mismo email.
-  if (email && email !== socioExistente.usuario.email) {
-    const emailExistente = await prisma.usuario.findUnique({
-      where: { email },
-    });
+// Servicio encargado de actualizar los datos de un socio existente.
+// Permite modificar información del socio y del usuario asociado.
+export const actualizarSocio = async (id, datosSocio) => {
+  // Valida el identificador antes de consultar o actualizar el socio.
+  const socioId = validarIdSocio(id);
 
-    if (emailExistente) {
-      throw new AppError("Ya existe un usuario registrado con ese email", 409);
-    }
-  }
+  // Extrae datos utilizados durante validaciones y actualización.
+  const { email, documento, nombre, apellido, telefono } = datosSocio;
 
-  // Ejecuta la actualización dentro de una transacción.
-  // Esto garantiza consistencia entre Usuario y Socio.
+  validarDatosActualizacionSocio(datosSocio);
+
+  const socioExistente = await obtenerSocioPorId(socioId);
+
+  await validarDocumentoDuplicadoSocio(documento, socioExistente);
+  await validarEmailDuplicadoUsuario(email, socioExistente);
+
+  // Ejecuta la actualización dentro de una transacción para mantener consistencia Usuario/Socio.
   const socioActualizado = await prisma.$transaction(async (tx) => {
-    // Si se recibió un nuevo email,
-    // actualiza también el usuario asociado.
     if (email) {
       await tx.usuario.update({
         where: { id: socioExistente.usuario_id },
@@ -278,21 +313,15 @@ export const actualizarSocio = async (id, datosSocio) => {
       });
     }
 
-    // Actualiza los datos del socio.
     return await tx.socio.update({
       where: { id: socioId },
-
       data: {
         documento,
         nombre,
         apellido,
         telefono,
-
-        // Actualiza la fecha de modificación.
         fecha_actualizacion: new Date(),
       },
-
-      // Retorna también información básica del usuario asociado.
       include: {
         usuario: {
           select: {
@@ -306,7 +335,6 @@ export const actualizarSocio = async (id, datosSocio) => {
     });
   });
 
-  // Devuelve el socio actualizado.
   return socioActualizado;
 };
 
@@ -321,77 +349,46 @@ export const actualizarSocio = async (id, datosSocio) => {
 // Además sincroniza automáticamente el estado
 // del usuario asociado según las reglas del negocio.
 export const cambiarEstadoSocio = async (id, nuevoEstado) => {
-  // Convierte el id recibido desde la URL a número.
-  const socioId = Number(id);
+  // Valida el identificador antes de cambiar el estado del socio.
+  const socioId = validarIdSocio(id);
 
-  // Valida que el estado recibido sea válido.
-  // Esto evita registrar estados inexistentes.
   if (!validarEstado(nuevoEstado)) {
     throw new AppError("El estado ingresado no es válido", 400);
   }
 
-  // Busca el socio junto con su usuario asociado.
-  // include permite acceder también al usuario relacionado.
-  const socioExistente = await prisma.socio.findUnique({
-    where: { id: socioId },
-    include: { usuario: true },
-  });
+  const socioExistente = await obtenerSocioPorId(socioId);
 
-  // Verifica que el socio exista antes de continuar.
-  if (!socioExistente) {
-    throw new AppError("El socio indicado no existe", 404);
-  }
-
-  // Variable utilizada para resolver automáticamente
-  // el estado que tendrá el usuario asociado.
+  // Resuelve el estado del usuario asociado según el estado del socio.
   let estadoUsuario;
 
-  // Si el socio queda ACTIVO,
-  // el usuario también recupera acceso normal.
   if (nuevoEstado === "ACTIVO") {
     estadoUsuario = "ACTIVO";
   }
 
-  // Si el socio queda INACTIVO,
-  // el usuario también queda inactivo.
   if (nuevoEstado === "INACTIVO") {
     estadoUsuario = "INACTIVO";
   }
 
-  // Si el socio queda SUSPENDIDO,
-  // el usuario asociado se bloquea.
   if (nuevoEstado === "SUSPENDIDO") {
     estadoUsuario = "BLOQUEADO";
   }
 
-  // Ejecuta toda la operación dentro de una transacción.
-  // Esto garantiza consistencia entre Usuario y Socio.
+  // Ejecuta la operación dentro de una transacción para mantener consistencia Usuario/Socio.
   const socioActualizado = await prisma.$transaction(async (tx) => {
-    // Actualiza primero el estado del usuario asociado.
     await tx.usuario.update({
       where: { id: socioExistente.usuario_id },
-
       data: {
         estado: estadoUsuario,
-
-        // Registra fecha de actualización.
         fecha_actualizacion: new Date(),
       },
     });
 
-    // Luego actualiza el estado del socio.
     return await tx.socio.update({
       where: { id: socioId },
-
       data: {
         estado: nuevoEstado,
-
-        // Registra fecha de actualización.
         fecha_actualizacion: new Date(),
       },
-
-      // Retorna también información básica
-      // del usuario asociado.
       include: {
         usuario: {
           select: {
@@ -405,7 +402,6 @@ export const cambiarEstadoSocio = async (id, nuevoEstado) => {
     });
   });
 
-  // Devuelve el socio actualizado.
   return socioActualizado;
 };
 

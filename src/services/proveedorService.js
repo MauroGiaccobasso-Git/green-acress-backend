@@ -2,32 +2,37 @@ import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
 import { validarEmail, validarTelefono } from "../utils/validaciones.js";
 
-export const obtenerProveedores = async (search) => {
-  // Si existe search, arma un filtro dinámico por campos principales.
-  const where = search
+// Obtiene proveedores registrados permitiendo búsqueda opcional
+// para facilitar la gestión administrativa.
+export const obtenerProveedores = async (search = "") => {
+  // Normaliza el criterio recibido para evitar espacios accidentales.
+  const searchNormalizado = search.trim();
+
+  // Construye filtros dinámicos solamente si existe búsqueda.
+  const where = searchNormalizado
     ? {
         OR: [
           {
             nombre: {
-              contains: search,
+              contains: searchNormalizado,
               mode: "insensitive",
             },
           },
           {
             contacto: {
-              contains: search,
+              contains: searchNormalizado,
               mode: "insensitive",
             },
           },
           {
             telefono: {
-              contains: search,
+              contains: searchNormalizado,
               mode: "insensitive",
             },
           },
           {
             email: {
-              contains: search,
+              contains: searchNormalizado,
               mode: "insensitive",
             },
           },
@@ -37,6 +42,8 @@ export const obtenerProveedores = async (search) => {
 
   return prisma.proveedor.findMany({
     where,
+
+    // Mantiene orden estable para facilitar lectura administrativa.
     orderBy: [
       {
         nombre: "asc",
