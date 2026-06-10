@@ -32,6 +32,9 @@ export const crearProductoController = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * Controller encargado de actualizar los datos editables de un producto existente.
+ */
 export const actualizarProductoController = asyncHandler(async (req, res) => {
   const productoActualizado = await actualizarProducto(req.params.id, req.body);
 

@@ -68,7 +68,7 @@ const validarNombreProducto = async (nombre, productoId) => {
           equals: nombre,
           mode: "insensitive",
         },
-        NOT: { id: productoId },
+        NOT: productoId ? { id: productoId } : undefined,
       },
     });
 
@@ -209,21 +209,14 @@ export const crearProducto = async (datosProducto) => {
   const {
     nombre,
     descripcion,
+    imagen_url,
     tipo,
     genetica,
     porcentaje_thc,
     precio_venta_actual,
   } = datosProducto;
 
-  const productoExistente = await prisma.producto.findFirst({
-    where: {
-      nombre: { equals: nombre, mode: "insensitive" },
-    },
-  });
-
-  if (productoExistente) {
-    throw new AppError("Producto ya existe", 400);
-  }
+  await validarNombreProducto(nombre);
 
   const unidad_medida = obtenerUnidadMedidaPorTipo(tipo);
 
@@ -243,10 +236,13 @@ export const crearProducto = async (datosProducto) => {
     throw new AppError("SEMILLA no permite THC", 400);
   }
 
+  validarPrecioProducto(precio_venta_actual);
+
   return prisma.producto.create({
     data: {
       nombre,
       descripcion,
+      imagen_url,
       tipo,
       genetica,
       porcentaje_thc,
@@ -262,8 +258,14 @@ export const actualizarProducto = async (id, datosProducto) => {
   const productoId = validarIdProducto(id);
   const productoExistente = await obtenerProductoPorId(productoId);
 
-  const { nombre, descripcion, tipo, genetica, precio_venta_actual } =
-    datosProducto;
+  const {
+    nombre,
+    descripcion,
+    imagen_url,
+    tipo,
+    genetica,
+    precio_venta_actual,
+  } = datosProducto;
 
   validarTipoInmutable(tipo, productoExistente);
   await validarNombreProducto(nombre, productoId);
@@ -284,6 +286,7 @@ export const actualizarProducto = async (id, datosProducto) => {
     data: {
       nombre,
       descripcion,
+      imagen_url,
       genetica: geneticaFinal,
       porcentaje_thc: porcentajeThcFinal,
       unidad_medida: productoExistente.unidad_medida,
