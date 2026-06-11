@@ -7,7 +7,7 @@ Objetivo:
 - limpiar productos y stocks existentes;
 - cargar 10 flores y 10 semillas;
 - generar datos visuales suficientes para probar UI;
-- usar imágenes externas estables mediante Picsum;
+- usar imágenes externas estables mediante Unsplash;
 - permitir evaluar cards, filtros, búsqueda, estados y stock.
 
 Importante:
@@ -19,7 +19,7 @@ const products = [
   {
     nombre: "Amnesia Haze",
     descripcion: "Flor sativa de aroma cítrico, perfil intenso y alta demanda.",
-    imagen_url: "https://picsum.photos/seed/amnesia-haze/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1741471596760-fe890227b18f?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "SATIVA",
     porcentaje_thc: 21,
@@ -35,7 +35,7 @@ const products = [
   {
     nombre: "Northern Lights",
     descripcion: "Flor índica clásica, compacta y de aroma herbal suave.",
-    imagen_url: "https://picsum.photos/seed/northern-lights/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1755427199677-ecf518e04737?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "INDICA",
     porcentaje_thc: 18,
@@ -51,7 +51,7 @@ const products = [
   {
     nombre: "Blue Dream",
     descripcion: "Flor híbrida equilibrada, dulce y de rotación frecuente.",
-    imagen_url: "https://picsum.photos/seed/blue-dream/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1776356829184-e00ba9e10eae?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "HIBRIDA",
     porcentaje_thc: 20,
@@ -67,7 +67,7 @@ const products = [
   {
     nombre: "Gorilla Glue",
     descripcion: "Flor híbrida potente, de aroma terroso y alta concentración.",
-    imagen_url: "https://picsum.photos/seed/gorilla-glue/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1758122140959-44d5c710670a?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "HIBRIDA",
     porcentaje_thc: 24,
@@ -83,7 +83,7 @@ const products = [
   {
     nombre: "OG Kush",
     descripcion: "Flor híbrida reconocida por su perfil aromático intenso.",
-    imagen_url: "https://picsum.photos/seed/og-kush/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1672692751292-f5b0bd1d3f08?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "HIBRIDA",
     porcentaje_thc: 22,
@@ -99,7 +99,7 @@ const products = [
   {
     nombre: "Critical Mass",
     descripcion: "Flor índica de buena producción y aroma equilibrado.",
-    imagen_url: "https://picsum.photos/seed/critical-mass/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1758552218642-588844d52458?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "INDICA",
     porcentaje_thc: 17,
@@ -115,7 +115,7 @@ const products = [
   {
     nombre: "Lemon Skunk",
     descripcion: "Flor sativa con notas cítricas marcadas y buena presencia.",
-    imagen_url: "https://picsum.photos/seed/lemon-skunk/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1498671546682-94a232c26d17?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "SATIVA",
     porcentaje_thc: 19,
@@ -131,7 +131,7 @@ const products = [
   {
     nombre: "White Widow",
     descripcion: "Flor híbrida histórica, actualmente fuera del catálogo activo.",
-    imagen_url: "https://picsum.photos/seed/white-widow/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1748608807231-2004f89a3d29?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "HIBRIDA",
     porcentaje_thc: 20,
@@ -147,7 +147,7 @@ const products = [
   {
     nombre: "Purple Punch",
     descripcion: "Flor índica de perfil dulce, coloración intensa y stock bajo.",
-    imagen_url: "https://picsum.photos/seed/purple-punch/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1755427199677-ecf518e04737?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "INDICA",
     porcentaje_thc: 23,
@@ -163,7 +163,7 @@ const products = [
   {
     nombre: "Sour Diesel",
     descripcion: "Flor sativa de aroma fuerte, actualmente inactiva.",
-    imagen_url: "https://picsum.photos/seed/sour-diesel/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1741471596760-fe890227b18f?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "FLOR",
     genetica: "SATIVA",
     porcentaje_thc: 21,
@@ -179,7 +179,7 @@ const products = [
   {
     nombre: "Semilla Amnesia Haze",
     descripcion: "Semilla feminizada de genética sativa.",
-    imagen_url: "https://picsum.photos/seed/semilla-amnesia-haze/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1748608807231-2004f89a3d29?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "SATIVA",
     porcentaje_thc: null,
@@ -195,7 +195,7 @@ const products = [
   {
     nombre: "Semilla Northern Lights",
     descripcion: "Semilla feminizada de genética índica.",
-    imagen_url: "https://picsum.photos/seed/semilla-northern-lights/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1498671546682-94a232c26d17?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "INDICA",
     porcentaje_thc: null,
@@ -211,7 +211,7 @@ const products = [
   {
     nombre: "Semilla Blue Dream",
     descripcion: "Semilla feminizada híbrida de perfil equilibrado.",
-    imagen_url: "https://picsum.photos/seed/semilla-blue-dream/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1758552218642-588844d52458?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
@@ -227,7 +227,7 @@ const products = [
   {
     nombre: "Semilla Gorilla Glue",
     descripcion: "Semilla híbrida de genética potente y alta demanda.",
-    imagen_url: "https://picsum.photos/seed/semilla-gorilla-glue/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1776356829184-e00ba9e10eae?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
@@ -243,7 +243,7 @@ const products = [
   {
     nombre: "Semilla OG Kush",
     descripcion: "Semilla híbrida de genética clásica.",
-    imagen_url: "https://picsum.photos/seed/semilla-og-kush/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1758122140959-44d5c710670a?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
@@ -259,7 +259,7 @@ const products = [
   {
     nombre: "Semilla Critical Mass",
     descripcion: "Semilla índica de alta producción.",
-    imagen_url: "https://picsum.photos/seed/semilla-critical-mass/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1672692751292-f5b0bd1d3f08?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "INDICA",
     porcentaje_thc: null,
@@ -275,7 +275,7 @@ const products = [
   {
     nombre: "Semilla Lemon Skunk",
     descripcion: "Semilla sativa con perfil cítrico.",
-    imagen_url: "https://picsum.photos/seed/semilla-lemon-skunk/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1755427199677-ecf518e04737?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "SATIVA",
     porcentaje_thc: null,
@@ -291,7 +291,7 @@ const products = [
   {
     nombre: "Semilla White Widow",
     descripcion: "Semilla híbrida actualmente fuera del catálogo activo.",
-    imagen_url: "https://picsum.photos/seed/semilla-white-widow/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1758122140959-44d5c710670a?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
@@ -307,7 +307,7 @@ const products = [
   {
     nombre: "Semilla Purple Punch",
     descripcion: "Semilla índica de perfil dulce y stock limitado.",
-    imagen_url: "https://picsum.photos/seed/semilla-purple-punch/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1758552218642-588844d52458?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "INDICA",
     porcentaje_thc: null,
@@ -323,7 +323,7 @@ const products = [
   {
     nombre: "Semilla Sour Diesel",
     descripcion: "Semilla sativa actualmente inactiva.",
-    imagen_url: "https://picsum.photos/seed/semilla-sour-diesel/600/600",
+    imagen_url: "https://images.unsplash.com/photo-1741471596760-fe890227b18f?auto=format&fit=crop&w=600&h=600&q=80",
     tipo: "SEMILLA",
     genetica: "SATIVA",
     porcentaje_thc: null,
