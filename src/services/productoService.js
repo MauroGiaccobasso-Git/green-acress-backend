@@ -201,7 +201,7 @@ export const getProductos = async (search = "") => {
   return prisma.producto.findMany({
     where: filtros.length > 0 ? { OR: filtros } : undefined,
     include: { stock: true },
-    orderBy: { id: "asc" },
+    orderBy: [{ estado: "asc" }, { fecha_creacion: "desc" }],
   });
 };
 
