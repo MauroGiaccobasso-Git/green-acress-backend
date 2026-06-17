@@ -19,7 +19,8 @@ export default defineConfig({
   },
 
   // Configuración de la conexión a la base de datos principal
+  // Prisma utiliza la variable de entorno DATABASE_URL para conectarse
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env.DATABASE_URL,
   },
 });

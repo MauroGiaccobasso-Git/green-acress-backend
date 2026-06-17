@@ -1,276 +1,276 @@
-  generator client {
-    provider = "prisma-client-js"
-  }
+generator client {
+  provider = "prisma-client-js"
+}
 
-  datasource db {
-    provider = "postgresql"
-  }
+datasource db {
+  provider = "postgresql"
+}
 
-  enum RolUsuario {
-    ADMIN
-    SOCIO
-  }
+model Usuario {
+  id                  Int           @id @default(autoincrement())
+  email               String        @unique
+  password_hash       String
+  intentos_fallidos   Int           @default(0)
+  bloqueado_hasta     DateTime?
+  fecha_creacion      DateTime      @default(now())
+  fecha_actualizacion DateTime      @updatedAt
+  rol                 RolUsuario
+  estado              EstadoUsuario @default(ACTIVO)
+  auditorias          Auditoria[]
+  reservas            Reserva[]
+  socio               Socio?
+  ventas              Venta[]
+}
 
-  enum EstadoUsuario {
-    ACTIVO
-    INACTIVO
-    BLOQUEADO
-  }
+model Socio {
+  id                      Int            @id @default(autoincrement())
+  usuario_id              Int            @unique
+  documento               String         @unique
+  nombre                  String
+  apellido                String
+  telefono                String
+  fecha_alta              DateTime       @default(now())
+  consentimiento_aceptado Boolean        @default(false)
+  fecha_consentimiento    DateTime?
+  fecha_creacion          DateTime       @default(now())
+  fecha_actualizacion     DateTime       @updatedAt
+  estado                  EstadoSocio    @default(ACTIVO)
+  notificaciones          Notificacion[]
+  reservas                Reserva[]
+  usuario                 Usuario        @relation(fields: [usuario_id], references: [id])
+  ventas                  Venta[]
+}
 
-  enum EstadoSocio {
-    ACTIVO
-    INACTIVO
-    SUSPENDIDO
-  }
+model Producto {
+  id                  Int               @id @default(autoincrement())
+  nombre              String            @unique
+  descripcion         String?
+  precio_venta_actual Float
+  estado              EstadoProducto    @default(ACTIVO)
+  fecha_creacion      DateTime          @default(now())
+  fecha_actualizacion DateTime          @updatedAt
+  genetica            GeneticaProducto?
+  porcentaje_thc      Float?
+  tipo                TipoProducto
+  unidad_medida       UnidadMedida
+  imagen_url          String?
+  compras_detalle     CompraDetalle[]
+  movimientos_stock   MovimientoStock[]
+  reservas_detalle    ReservaDetalle[]
+  stock               Stock?
+  ventas_detalle      VentaDetalle[]
+}
 
-  enum EstadoProducto {
-    ACTIVO
-    INACTIVO
-  }
+model Stock {
+  id                  Int      @id @default(autoincrement())
+  producto_id         Int      @unique
+  cantidad_total      Float    @default(0)
+  cantidad_reservada  Float    @default(0)
+  cantidad_disponible Float    @default(0)
+  fecha_actualizacion DateTime @updatedAt
+  producto            Producto @relation(fields: [producto_id], references: [id])
+}
 
-  enum TipoProducto {
-    FLOR
-    SEMILLA
-  }
+model MovimientoStock {
+  id              Int                 @id @default(autoincrement())
+  producto_id     Int
+  tipo            TipoMovimientoStock
+  cantidad        Float
+  referencia_id   Int?
+  fecha_creacion  DateTime            @default(now())
+  referencia_tipo String?
+  producto        Producto            @relation(fields: [producto_id], references: [id])
+}
 
-  enum UnidadMedida {
-    GRAMOS
-    UNIDADES
-  }
+model Proveedor {
+  id                  Int             @id @default(autoincrement())
+  nombre              String
+  contacto            String?
+  telefono            String?
+  email               String?
+  estado              EstadoProveedor @default(ACTIVO)
+  fecha_creacion      DateTime        @default(now())
+  fecha_actualizacion DateTime        @updatedAt
+  compras             Compra[]
+}
 
-  enum GeneticaProducto {
-    INDICA
-    SATIVA
-    HIBRIDA
-  }
+model Compra {
+  id                  Int             @id @default(autoincrement())
+  proveedor_id        Int
+  fecha               DateTime        @default(now())
+  estado              EstadoCompra    @default(REGISTRADA)
+  observaciones       String?
+  fecha_creacion      DateTime        @default(now())
+  fecha_actualizacion DateTime        @updatedAt
+  proveedor           Proveedor       @relation(fields: [proveedor_id], references: [id])
+  detalles            CompraDetalle[]
+}
 
-  enum EstadoProveedor {
-    ACTIVO
-    INACTIVO
-  }
+model CompraDetalle {
+  id              Int      @id @default(autoincrement())
+  compra_id       Int
+  producto_id     Int
+  cantidad        Float
+  precio_unitario Float
+  subtotal        Float
+  compra          Compra   @relation(fields: [compra_id], references: [id])
+  producto        Producto @relation(fields: [producto_id], references: [id])
+}
 
-  enum EstadoReserva {
-    PENDIENTE
-    CONFIRMADA
-    RECHAZADA
-    CANCELADA
-    VENCIDA
-    FINALIZADA
-  }
+model Venta {
+  id                  Int            @id @default(autoincrement())
+  socio_id            Int
+  usuario_id          Int
+  fecha               DateTime       @default(now())
+  estado              EstadoVenta    @default(REGISTRADA)
+  observaciones       String?
+  fecha_creacion      DateTime       @default(now())
+  fecha_actualizacion DateTime       @updatedAt
+  socio               Socio          @relation(fields: [socio_id], references: [id])
+  usuario             Usuario        @relation(fields: [usuario_id], references: [id])
+  detalles            VentaDetalle[]
+}
 
-  enum EstadoVenta {
-    REGISTRADA
-    ANULADA
-  }
+model VentaDetalle {
+  id              Int      @id @default(autoincrement())
+  venta_id        Int
+  producto_id     Int
+  cantidad        Float
+  precio_unitario Float
+  producto        Producto @relation(fields: [producto_id], references: [id])
+  venta           Venta    @relation(fields: [venta_id], references: [id])
+}
 
-  enum EstadoCompra {
-    REGISTRADA
-    ANULADA
-  }
+model Reserva {
+  id                  Int                @id @default(autoincrement())
+  socio_id            Int
+  usuario_id          Int
+  fecha_solicitud     DateTime           @default(now())
+  fecha_limite_retiro DateTime
+  estado              EstadoReserva      @default(PENDIENTE)
+  observaciones       String?
+  fecha_actualizacion DateTime           @updatedAt
+  historial           HistorialReserva[]
+  socio               Socio              @relation(fields: [socio_id], references: [id])
+  usuario             Usuario            @relation(fields: [usuario_id], references: [id])
+  detalles            ReservaDetalle[]
+}
 
-  enum EstadoNotificacion {
-    PENDIENTE
-    ENVIADA
-    ERROR
-  }
+model ReservaDetalle {
+  id          Int      @id @default(autoincrement())
+  reserva_id  Int
+  producto_id Int
+  cantidad    Float
+  producto    Producto @relation(fields: [producto_id], references: [id])
+  reserva     Reserva  @relation(fields: [reserva_id], references: [id])
+}
 
-  enum TipoMovimientoStock {
-    INGRESO
-    EGRESO
-    RESERVA
-    LIBERACION_RESERVA
-    AJUSTE
-  }
+model HistorialReserva {
+  id            Int           @id @default(autoincrement())
+  reserva_id    Int
+  estado        EstadoReserva
+  fecha         DateTime      @default(now())
+  observaciones String?
+  reserva       Reserva       @relation(fields: [reserva_id], references: [id])
+}
 
-  model Usuario {
-    id                  Int           @id @default(autoincrement())
-    email               String        @unique
-    password_hash       String
-    estado              EstadoUsuario @default(ACTIVO)
-    intentos_fallidos   Int           @default(0)
-    bloqueado_hasta     DateTime?
-    fecha_creacion      DateTime      @default(now())
-    fecha_actualizacion DateTime      @updatedAt
-    rol                 RolUsuario
-    auditorias          Auditoria[]
-    reservas            Reserva[]
-    socio               Socio?
-    ventas              Venta[]
-  }
+model Auditoria {
+  id             Int      @id @default(autoincrement())
+  usuario_id     Int
+  accion         String
+  entidad        String
+  entidad_id     Int?
+  detalle        String?
+  fecha_creacion DateTime @default(now())
+  usuario        Usuario  @relation(fields: [usuario_id], references: [id])
+}
 
-  model Socio {
-    id                      Int            @id @default(autoincrement())
-    usuario_id              Int            @unique
-    documento               String         @unique
-    nombre                  String
-    apellido                String
-    telefono                String
-    estado                  EstadoSocio    @default(ACTIVO)
-    fecha_alta              DateTime       @default(now())
-    consentimiento_aceptado Boolean        @default(false)
-    fecha_consentimiento    DateTime?
-    fecha_creacion          DateTime       @default(now())
-    fecha_actualizacion     DateTime       @updatedAt
-    notificaciones          Notificacion[]
-    reservas                Reserva[]
-    usuario                 Usuario        @relation(fields: [usuario_id], references: [id])
-    ventas                  Venta[]
-  }
+model Notificacion {
+  id             Int                @id @default(autoincrement())
+  socio_id       Int?
+  tipo           String
+  mensaje        String
+  canal          String
+  estado         EstadoNotificacion @default(PENDIENTE)
+  origen_id      Int?
+  fecha_envio    DateTime?
+  fecha_creacion DateTime           @default(now())
+  origen_tipo    String?
+  socio          Socio?             @relation(fields: [socio_id], references: [id])
+}
 
-  model Producto {
-    id                  Int               @id @default(autoincrement())
-    nombre              String            @unique
-    descripcion         String?
-    imagen_url          String?
-    tipo                TipoProducto
-    genetica            GeneticaProducto?
-    porcentaje_thc      Float?
-    unidad_medida       UnidadMedida
-    precio_venta_actual Float
-    estado              EstadoProducto    @default(ACTIVO)
-    fecha_creacion      DateTime          @default(now())
-    fecha_actualizacion DateTime          @updatedAt
-    compras_detalle     CompraDetalle[]
-    movimientos_stock   MovimientoStock[]
-    reservas_detalle    ReservaDetalle[]
-    stock               Stock?
-    ventas_detalle      VentaDetalle[]
-  }
+enum RolUsuario {
+  ADMIN
+  SOCIO
+}
 
-  model Stock {
-    id                  Int      @id @default(autoincrement())
-    producto_id         Int      @unique
-    cantidad_total      Float    @default(0)
-    cantidad_reservada  Float    @default(0)
-    cantidad_disponible Float    @default(0)
-    fecha_actualizacion DateTime @updatedAt
-    producto            Producto @relation(fields: [producto_id], references: [id])
-  }
+enum EstadoUsuario {
+  ACTIVO
+  INACTIVO
+  BLOQUEADO
+}
 
-  model MovimientoStock {
-    id              Int                 @id @default(autoincrement())
-    producto_id     Int
-    tipo            TipoMovimientoStock
-    cantidad        Float
-    referencia_tipo String?
-    referencia_id   Int?
-    fecha_creacion  DateTime            @default(now())
-    producto        Producto            @relation(fields: [producto_id], references: [id])
-  }
+enum EstadoSocio {
+  ACTIVO
+  INACTIVO
+  SUSPENDIDO
+}
 
-  model Proveedor {
-    id                  Int             @id @default(autoincrement())
-    nombre              String
-    contacto            String?
-    telefono            String?
-    email               String?
-    estado              EstadoProveedor @default(ACTIVO)
-    fecha_creacion      DateTime        @default(now())
-    fecha_actualizacion DateTime        @updatedAt
-    compras             Compra[]
-  }
+enum EstadoProducto {
+  ACTIVO
+  INACTIVO
+}
 
-  model Compra {
-    id                  Int             @id @default(autoincrement())
-    proveedor_id        Int
-    fecha               DateTime        @default(now())
-    estado              EstadoCompra    @default(REGISTRADA)
-    observaciones       String?
-    fecha_creacion      DateTime        @default(now())
-    fecha_actualizacion DateTime        @updatedAt
-    proveedor           Proveedor       @relation(fields: [proveedor_id], references: [id])
-    detalles            CompraDetalle[]
-  }
+enum TipoProducto {
+  FLOR
+  SEMILLA
+}
 
-  model CompraDetalle {
-    id              Int      @id @default(autoincrement())
-    compra_id       Int
-    producto_id     Int
-    cantidad        Float
-    precio_unitario Float
-    subtotal        Float
-    compra          Compra   @relation(fields: [compra_id], references: [id])
-    producto        Producto @relation(fields: [producto_id], references: [id])
-  }
+enum UnidadMedida {
+  GRAMOS
+  UNIDADES
+}
 
-  model Venta {
-    id                  Int            @id @default(autoincrement())
-    socio_id            Int
-    usuario_id          Int
-    fecha               DateTime       @default(now())
-    estado              EstadoVenta    @default(REGISTRADA)
-    observaciones       String?
-    fecha_creacion      DateTime       @default(now())
-    fecha_actualizacion DateTime       @updatedAt
-    socio               Socio          @relation(fields: [socio_id], references: [id])
-    usuario             Usuario        @relation(fields: [usuario_id], references: [id])
-    detalles            VentaDetalle[]
-  }
+enum GeneticaProducto {
+  INDICA
+  SATIVA
+  HIBRIDA
+}
 
-  model VentaDetalle {
-    id              Int      @id @default(autoincrement())
-    venta_id        Int
-    producto_id     Int
-    cantidad        Float
-    precio_unitario Float
-    producto        Producto @relation(fields: [producto_id], references: [id])
-    venta           Venta    @relation(fields: [venta_id], references: [id])
-  }
+enum EstadoProveedor {
+  ACTIVO
+  INACTIVO
+}
 
-  model Reserva {
-    id                  Int                @id @default(autoincrement())
-    socio_id            Int
-    usuario_id          Int
-    fecha_solicitud     DateTime           @default(now())
-    fecha_limite_retiro DateTime
-    estado              EstadoReserva      @default(PENDIENTE)
-    observaciones       String?
-    fecha_actualizacion DateTime           @updatedAt
-    historial           HistorialReserva[]
-    socio               Socio              @relation(fields: [socio_id], references: [id])
-    usuario             Usuario            @relation(fields: [usuario_id], references: [id])
-    detalles            ReservaDetalle[]
-  }
+enum EstadoReserva {
+  PENDIENTE
+  CONFIRMADA
+  RECHAZADA
+  CANCELADA
+  VENCIDA
+  FINALIZADA
+}
 
-  model ReservaDetalle {
-    id          Int      @id @default(autoincrement())
-    reserva_id  Int
-    producto_id Int
-    cantidad    Float
-    producto    Producto @relation(fields: [producto_id], references: [id])
-    reserva     Reserva  @relation(fields: [reserva_id], references: [id])
-  }
+enum EstadoVenta {
+  REGISTRADA
+  ANULADA
+}
 
-  model HistorialReserva {
-    id            Int           @id @default(autoincrement())
-    reserva_id    Int
-    estado        EstadoReserva
-    fecha         DateTime      @default(now())
-    observaciones String?
-    reserva       Reserva       @relation(fields: [reserva_id], references: [id])
-  }
+enum EstadoCompra {
+  REGISTRADA
+  ANULADA
+}
 
-  model Auditoria {
-    id             Int      @id @default(autoincrement())
-    usuario_id     Int
-    accion         String
-    entidad        String
-    entidad_id     Int?
-    detalle        String?
-    fecha_creacion DateTime @default(now())
-    usuario        Usuario  @relation(fields: [usuario_id], references: [id])
-  }
+enum EstadoNotificacion {
+  PENDIENTE
+  ENVIADA
+  ERROR
+}
 
-  model Notificacion {
-    id             Int                @id @default(autoincrement())
-    socio_id       Int?
-    tipo           String
-    mensaje        String
-    canal          String
-    estado         EstadoNotificacion @default(PENDIENTE)
-    origen_id      Int?
-    fecha_envio    DateTime?
-    fecha_creacion DateTime           @default(now())
-    origen_tipo    String?
-    socio          Socio?             @relation(fields: [socio_id], references: [id])
-  }
+enum TipoMovimientoStock {
+  INGRESO
+  EGRESO
+  RESERVA
+  LIBERACION_RESERVA
+  AJUSTE
+}

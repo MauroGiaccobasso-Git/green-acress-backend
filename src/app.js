@@ -1,3 +1,7 @@
+import "dotenv/config";
+
+
+import prisma from "./config/prisma.js";
 // Archivo principal del backend.
 import express from "express";
 import cors from "cors";
@@ -34,6 +38,7 @@ app.use("/auth", authRoutes);
 app.use("/socios", socioRoutes);
 app.use("/productos", productoRoutes);
 app.use("/proveedores", proveedorRoutes);
+
 
 // Middleware global para manejo centralizado de errores.
 app.use(errorHandler);

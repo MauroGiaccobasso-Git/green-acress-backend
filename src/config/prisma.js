@@ -1,27 +1,31 @@
 // Importa las variables de entorno definidas en el archivo .env
-// Permite acceder a DATABASE_URL desde process.env
 import "dotenv/config";
 
-// Importa la clase PrismaClient desde la librería @prisma/client
-// Esta clase permite interactuar con la base de datos utilizando Prisma ORM
+// Importa PrismaClient desde @prisma/client
 import { PrismaClient } from "@prisma/client";
 
 // Importa el adapter de PostgreSQL requerido por Prisma 7
-// Este adapter es necesario para establecer la conexión con la base de datos
 import { PrismaPg } from "@prisma/adapter-pg";
 
-// Configura el adapter con la conexión a PostgreSQL
-// Utiliza la variable de entorno DATABASE_URL definida en el archivo .env
+// Obtiene la URL de conexión desde el .env
+const databaseUrl = process.env.DATABASE_URL;
+
+// Detecta si la conexión apunta a AWS RDS.
+// AWS necesita SSL, PostgreSQL local no.
+const isAwsRds = databaseUrl.includes("amazonaws.com");
+
+// Configura el adapter según el entorno actual.
 const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: databaseUrl,
+  ...(isAwsRds && {
+    ssl: {
+      rejectUnauthorized: false,
+    },
+  }),
 });
 
-// Crea una instancia del cliente Prisma
-// Esta instancia será utilizada para realizar consultas a la base de datos
-// a través de los modelos definidos en el archivo schema.prisma
-// En Prisma 7 se debe pasar el adapter como configuración
+// Crea una instancia única de Prisma Client usando el adapter.
 const prisma = new PrismaClient({ adapter });
 
-// Exporta la instancia de Prisma para que pueda ser utilizada en otros módulos del backend,
-// como services o controllers, permitiendo interactuar con la base de datos desde distintas partes del sistema
+// Exporta Prisma para reutilizarlo en services, controllers y helpers.
 export default prisma;
