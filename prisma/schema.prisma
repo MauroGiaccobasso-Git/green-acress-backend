@@ -16,6 +16,7 @@ model Usuario {
   fecha_actualizacion DateTime      @updatedAt
   rol                 RolUsuario
   estado              EstadoUsuario @default(ACTIVO)
+  compras             Compra[]
   auditorias          Auditoria[]
   reservas            Reserva[]
   socio               Socio?
@@ -97,6 +98,7 @@ model Proveedor {
 model Compra {
   id                  Int             @id @default(autoincrement())
   proveedor_id        Int
+  usuario_id          Int
   fecha               DateTime        @default(now())
   estado              EstadoCompra    @default(REGISTRADA)
   observaciones       String?
@@ -104,6 +106,7 @@ model Compra {
   fecha_actualizacion DateTime        @updatedAt
   proveedor           Proveedor       @relation(fields: [proveedor_id], references: [id])
   detalles            CompraDetalle[]
+  usuario             Usuario         @relation(fields: [usuario_id], references: [id])
 }
 
 model CompraDetalle {
