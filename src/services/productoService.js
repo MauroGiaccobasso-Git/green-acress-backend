@@ -91,12 +91,13 @@ const validarTipoInmutable = (tipo, productoExistente) => {
   }
 };
 
-// Valida el precio de venta si fue enviado en la actualización.
+// Valida que el precio de venta exista y sea mayor a cero.
 const validarPrecioProducto = (precio_venta_actual) => {
   if (
-    precio_venta_actual !== undefined &&
-    (Number.isNaN(Number(precio_venta_actual)) ||
-      Number(precio_venta_actual) <= 0)
+    precio_venta_actual === undefined ||
+    precio_venta_actual === null ||
+    Number.isNaN(Number(precio_venta_actual)) ||
+    Number(precio_venta_actual) <= 0
   ) {
     throw new AppError("El precio de venta debe ser mayor a cero", 400);
   }
@@ -230,13 +231,21 @@ export const crearProducto = async (datosProducto) => {
     if (!porcentaje_thc || thc <= 0 || thc > 100) {
       throw new AppError("THC inválido", 400);
     }
+
+    validarPrecioProducto(precio_venta_actual);
   }
 
-  if (tipo === "SEMILLA" && porcentaje_thc != null) {
-    throw new AppError("SEMILLA no permite THC", 400);
+  if (tipo === "SEMILLA") {
+    if (porcentaje_thc != null) {
+      throw new AppError("SEMILLA no permite THC", 400);
+    }
+
+    if (precio_venta_actual != null) {
+      throw new AppError("SEMILLA no debe registrar precio de venta", 400);
+    }
   }
 
-  validarPrecioProducto(precio_venta_actual);
+  const precioVentaFinal = tipo === "FLOR" ? Number(precio_venta_actual) : null;
 
   return prisma.producto.create({
     data: {
@@ -245,9 +254,9 @@ export const crearProducto = async (datosProducto) => {
       imagen_url,
       tipo,
       genetica,
-      porcentaje_thc,
+      porcentaje_thc: tipo === "FLOR" ? Number(porcentaje_thc) : null,
       unidad_medida,
-      precio_venta_actual,
+      precio_venta_actual: precioVentaFinal,
       stock: { create: {} },
     },
     include: { stock: true },
@@ -269,7 +278,6 @@ export const actualizarProducto = async (id, datosProducto) => {
 
   validarTipoInmutable(tipo, productoExistente);
   await validarNombreProducto(nombre, productoId);
-  validarPrecioProducto(precio_venta_actual);
 
   const tipoFinal = productoExistente.tipo;
 
@@ -281,6 +289,25 @@ export const actualizarProducto = async (id, datosProducto) => {
     tipoFinal,
   );
 
+  // El precio de venta solo aplica a productos tipo FLOR.
+  // Para SEMILLA se conserva siempre en null porque no se comercializa a socios.
+  let precioVentaFinal = productoExistente.precio_venta_actual;
+
+  if (tipoFinal === "FLOR") {
+    if (precio_venta_actual !== undefined) {
+      validarPrecioProducto(precio_venta_actual);
+      precioVentaFinal = Number(precio_venta_actual);
+    }
+  }
+
+  if (tipoFinal === "SEMILLA") {
+    if (precio_venta_actual != null) {
+      throw new AppError("SEMILLA no debe registrar precio de venta", 400);
+    }
+
+    precioVentaFinal = null;
+  }
+
   return prisma.producto.update({
     where: { id: productoId },
     data: {
@@ -290,8 +317,7 @@ export const actualizarProducto = async (id, datosProducto) => {
       genetica: geneticaFinal,
       porcentaje_thc: porcentajeThcFinal,
       unidad_medida: productoExistente.unidad_medida,
-      precio_venta_actual:
-        precio_venta_actual ?? productoExistente.precio_venta_actual,
+      precio_venta_actual: precioVentaFinal,
     },
     include: { stock: true },
   });
