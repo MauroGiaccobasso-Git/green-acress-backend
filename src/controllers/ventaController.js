@@ -17,6 +17,8 @@ export const getVentasController = asyncHandler(async (req, res) => {
     search: req.query.search,
     estado: req.query.estado,
     socioId: req.query.socio_id,
+    fechaDesde: req.query.fecha_desde,
+    fechaHasta: req.query.fecha_hasta,
   });
 
   return res.status(200).json({

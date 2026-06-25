@@ -141,7 +141,9 @@ const validarDetallesVenta = (detalles) => {
 
   const detallesNormalizados = detalles.map(validarDetalleVenta);
 
-  const productosIds = detallesNormalizados.map((detalle) => detalle.productoId);
+  const productosIds = detallesNormalizados.map(
+    (detalle) => detalle.productoId,
+  );
   const productosUnicos = new Set(productosIds);
 
   if (productosIds.length !== productosUnicos.size) {
@@ -245,7 +247,10 @@ const validarProductoVendible = (producto) => {
   }
 
   if (producto.tipo !== "FLOR") {
-    throw new AppError("Las ventas solo pueden incluir productos tipo FLOR", 400);
+    throw new AppError(
+      "Las ventas solo pueden incluir productos tipo FLOR",
+      400,
+    );
   }
 
   if (
@@ -264,21 +269,65 @@ const validarProductoVendible = (producto) => {
    HELPERS DE FILTROS
 ========================================================= */
 
+// Valida que el estado recibido sea válido para ventas.
+const validarEstadoVentaFiltro = (estado) => {
+  if (!["REGISTRADA", "ANULADA"].includes(estado)) {
+    throw new AppError("El estado de venta indicado no es válido", 400);
+  }
+
+  return estado;
+};
+
+// Convierte una fecha de filtro a Date válida.
+const validarFechaFiltro = (fecha, campo) => {
+  const fechaConvertida = new Date(fecha);
+
+  if (Number.isNaN(fechaConvertida.getTime())) {
+    throw new AppError(`La fecha ${campo} no es válida`, 400);
+  }
+
+  return fechaConvertida;
+};
+
 // Construye filtros administrativos simples para el listado de ventas.
-const construirFiltrosVentas = ({ search = "", estado, socioId } = {}) => {
+const construirFiltrosVentas = ({
+  search = "",
+  estado,
+  socioId,
+  fechaDesde,
+  fechaHasta,
+} = {}) => {
   const filtros = {};
 
   if (estado) {
-    filtros.estado = estado;
+    filtros.estado = validarEstadoVentaFiltro(estado);
   }
 
   if (socioId) {
     filtros.socio_id = validarIdSocio(socioId);
   }
 
+  if (fechaDesde || fechaHasta) {
+    filtros.fecha = {};
+
+    if (fechaDesde) {
+      filtros.fecha.gte = validarFechaFiltro(fechaDesde, "desde");
+    }
+
+    if (fechaHasta) {
+      const fechaHastaConvertida = validarFechaFiltro(fechaHasta, "hasta");
+      fechaHastaConvertida.setDate(fechaHastaConvertida.getDate() + 1);
+
+      filtros.fecha.lt = fechaHastaConvertida;
+    }
+  }
+
   const searchNormalizado = search.trim();
 
   if (searchNormalizado) {
+    const ventaIdSearch = searchNormalizado.replace(/\D/g, "");
+    const ventaId = ventaIdSearch ? Number(ventaIdSearch) : null;
+
     filtros.OR = [
       {
         socio: {
@@ -305,6 +354,12 @@ const construirFiltrosVentas = ({ search = "", estado, socioId } = {}) => {
         },
       },
     ];
+
+    if (ventaId && Number.isInteger(ventaId)) {
+      filtros.OR.push({
+        id: ventaId,
+      });
+    }
   }
 
   return filtros;
