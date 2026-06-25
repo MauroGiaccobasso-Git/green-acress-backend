@@ -126,6 +126,7 @@ model Venta {
   usuario_id          Int
   fecha               DateTime       @default(now())
   estado              EstadoVenta    @default(REGISTRADA)
+  total               Float
   observaciones       String?
   fecha_creacion      DateTime       @default(now())
   fecha_actualizacion DateTime       @updatedAt
@@ -140,6 +141,7 @@ model VentaDetalle {
   producto_id     Int
   cantidad        Float
   precio_unitario Float
+  subtotal        Float
   producto        Producto @relation(fields: [producto_id], references: [id])
   venta           Venta    @relation(fields: [venta_id], references: [id])
 }

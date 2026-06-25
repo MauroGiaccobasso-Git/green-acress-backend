@@ -49,7 +49,7 @@ router.patch(
   "/consentimiento",
   verificarToken,
   autorizarRoles("SOCIO"),
-  aceptarConsentimientoSocio
+  aceptarConsentimientoSocio,
 );
 
 // Ruta PUT para actualizar un socio existente.
