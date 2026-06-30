@@ -28,19 +28,42 @@ const validarCantidadPositiva = (cantidad) => {
   return cantidadNumerica;
 };
 
-// Valida una cantidad total final para ajustes administrativos.
+// Valida una cantidad total para un ajuste administrativo.
+// Debe ser un número válido y no puede ser negativa.
 const validarCantidadTotalAjuste = (cantidadTotal) => {
   const cantidadNumerica = Number(cantidadTotal);
 
-  if (Number.isNaN(cantidadNumerica) || cantidadNumerica < 0) {
+  if (Number.isNaN(cantidadNumerica)) {
+    throw new AppError(
+      "La cantidad total ajustada debe ser un número válido",
+      400,
+    );
+  }
+
+  if (cantidadNumerica < 0) {
     throw new AppError("La cantidad total ajustada no puede ser negativa", 400);
   }
 
   return cantidadNumerica;
 };
 
+// Valida que un ajuste manual quede justificado.
+// Solo los movimientos de tipo AJUSTE requieren observación obligatoria.
+const validarObservacionesAjuste = (observaciones) => {
+  const texto = String(observaciones ?? "").trim();
+
+  if (!texto) {
+    throw new AppError(
+      "Debe ingresar una observación para justificar el ajuste",
+      400,
+    );
+  }
+
+  return texto;
+};
+
 /* =========================================================
-   HELPERS DE BÚSQUEDA
+   HELPERS
 ========================================================= */
 
 // Obtiene el stock asociado a un producto.
@@ -57,8 +80,56 @@ const obtenerStockPorProducto = async (productoId, tx = prisma) => {
   return stock;
 };
 
+// Construye filtros administrativos para consultar inventario.
+const construirFiltrosInventario = ({ search, tipo, estado } = {}) => ({
+  producto: {
+    ...(search
+      ? {
+          OR: [
+            { nombre: { contains: search, mode: "insensitive" } },
+            { descripcion: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    ...(tipo ? { tipo } : {}),
+    ...(estado ? { estado } : {}),
+  },
+});
+
+// Construye filtros administrativos para consultar movimientos de stock.
+const construirFiltrosMovimientos = ({
+  search,
+  tipo,
+  referenciaTipo,
+  productoId,
+  fechaDesde,
+  fechaHasta,
+} = {}) => ({
+  ...(tipo ? { tipo } : {}),
+  ...(referenciaTipo ? { referencia_tipo: referenciaTipo } : {}),
+  ...(productoId ? { producto_id: validarIdProducto(productoId) } : {}),
+  ...(fechaDesde || fechaHasta
+    ? {
+        fecha_creacion: {
+          ...(fechaDesde ? { gte: new Date(fechaDesde) } : {}),
+          ...(fechaHasta ? { lte: new Date(fechaHasta) } : {}),
+        },
+      }
+    : {}),
+  producto: {
+    ...(search
+      ? {
+          OR: [
+            { nombre: { contains: search, mode: "insensitive" } },
+            { descripcion: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  },
+});
+
 /* =========================================================
-   HELPERS DE VALIDACIÓN DE STOCK
+   VALIDACIONES DE STOCK
 ========================================================= */
 
 // Verifica que exista stock disponible suficiente.
@@ -91,7 +162,14 @@ const validarAjusteCompatibleConReservas = (stock, nuevaCantidadTotal) => {
 
 // Registra la trazabilidad de cada operación realizada sobre el inventario.
 const registrarMovimientoStock = async (
-  { productoId, tipo, cantidad, referenciaTipo = null, referenciaId = null },
+  {
+    productoId,
+    tipo,
+    cantidad,
+    referenciaTipo = null,
+    referenciaId = null,
+    observaciones = null,
+  },
   tx = prisma,
 ) => {
   return tx.movimientoStock.create({
@@ -101,6 +179,7 @@ const registrarMovimientoStock = async (
       cantidad,
       referencia_tipo: referenciaTipo,
       referencia_id: referenciaId,
+      observaciones,
     },
   });
 };
@@ -134,6 +213,92 @@ const ejecutarOperacionStock = async (txExterna, operacion) => {
   }
 
   return prisma.$transaction(async (tx) => operacion(tx));
+};
+
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
+========================================================= */
+
+// Consulta el inventario actual de productos para administración.
+export const getInventario = async ({ search, tipo, estado } = {}) => {
+  const where = construirFiltrosInventario({ search, tipo, estado });
+
+  const inventario = await prisma.stock.findMany({
+    where,
+    include: {
+      producto: true,
+    },
+    orderBy: {
+      producto: {
+        nombre: "asc",
+      },
+    },
+  });
+
+  return inventario.map((item) => ({
+    producto_id: item.producto_id,
+    producto: {
+      id: item.producto.id,
+      nombre: item.producto.nombre,
+      tipo: item.producto.tipo,
+      genetica: item.producto.genetica,
+      unidad_medida: item.producto.unidad_medida,
+      estado: item.producto.estado,
+      imagen_url: item.producto.imagen_url,
+    },
+    cantidad_total: item.cantidad_total,
+    cantidad_reservada: item.cantidad_reservada,
+    cantidad_disponible: item.cantidad_disponible,
+    fecha_actualizacion: item.fecha_actualizacion,
+  }));
+};
+
+// Consulta el historial de movimientos de stock para trazabilidad administrativa.
+export const getMovimientosStock = async ({
+  search,
+  tipo,
+  referenciaTipo,
+  productoId,
+  fechaDesde,
+  fechaHasta,
+} = {}) => {
+  const where = construirFiltrosMovimientos({
+    search,
+    tipo,
+    referenciaTipo,
+    productoId,
+    fechaDesde,
+    fechaHasta,
+  });
+
+  const movimientos = await prisma.movimientoStock.findMany({
+    where,
+    include: {
+      producto: {
+        select: {
+          id: true,
+          nombre: true,
+          tipo: true,
+          unidad_medida: true,
+          estado: true,
+        },
+      },
+    },
+    orderBy: {
+      fecha_creacion: "desc",
+    },
+  });
+
+  return movimientos.map((movimiento) => ({
+    producto_id: movimiento.producto_id,
+    producto: movimiento.producto,
+    tipo: movimiento.tipo,
+    cantidad: movimiento.cantidad,
+    referencia_tipo: movimiento.referencia_tipo,
+    referencia_id: movimiento.referencia_id,
+    observaciones: movimiento.observaciones,
+    fecha_creacion: movimiento.fecha_creacion,
+  }));
 };
 
 /* =========================================================
@@ -302,11 +467,13 @@ export const ajustarStock = async (
     nuevaCantidadTotal,
     referenciaTipo = "AJUSTE_MANUAL",
     referenciaId = null,
+    observaciones,
   },
   txExterna = null,
 ) => {
   const idProducto = validarIdProducto(productoId);
   const cantidadTotalNumerica = validarCantidadTotalAjuste(nuevaCantidadTotal);
+  const observacionesAjuste = validarObservacionesAjuste(observaciones);
 
   const operacion = async (tx) => {
     const stockActual = await obtenerStockPorProducto(idProducto, tx);
@@ -333,6 +500,7 @@ export const ajustarStock = async (
         cantidad: diferencia,
         referenciaTipo,
         referenciaId,
+        observaciones: observacionesAjuste,
       },
       tx,
     );

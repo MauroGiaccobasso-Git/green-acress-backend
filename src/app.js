@@ -15,6 +15,7 @@ import productoRoutes from "./routes/productoRoutes.js";
 import proveedorRoutes from "./routes/proveedorRoutes.js";
 import compraRoutes from "./routes/compraRoutes.js";
 import ventaRoutes from "./routes/ventaRoutes.js";
+import stockRoutes from "./routes/stockRoutes.js";
 
 // Middlewares
 import { errorHandler } from "./middlewares/errorHandler.js";
@@ -42,6 +43,7 @@ app.use("/productos", productoRoutes);
 app.use("/proveedores", proveedorRoutes);
 app.use("/compras", compraRoutes);
 app.use("/ventas", ventaRoutes);
+app.use("/stock", stockRoutes);
 
 
 // Middleware global para manejo centralizado de errores.
