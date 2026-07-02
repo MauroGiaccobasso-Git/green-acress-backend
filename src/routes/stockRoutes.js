@@ -1,6 +1,7 @@
 import express from "express";
 
 import {
+  getResumenStockController,
   getInventarioController,
   getMovimientosStockController,
   ajustarStockController,
@@ -21,6 +22,17 @@ const router = express.Router();
   2. Rol ADMIN, ya que únicamente los administradores
      pueden consultar el inventario y realizar ajustes.
 */
+
+/*
+  Obtiene el resumen global del inventario utilizado
+  por las KPI del panel administrativo.
+*/
+router.get(
+  "/resumen",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getResumenStockController,
+);
 
 router.get(
   "/",
