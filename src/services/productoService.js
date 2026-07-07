@@ -16,6 +16,20 @@ const validarIdProducto = (id) => {
   return productoId;
 };
 
+// Normaliza y valida los parámetros de paginación administrativa.
+const validarPaginacion = (page, limit) => {
+  const pageNumber = Number(page);
+  const limitNumber = Number(limit);
+
+  return {
+    page: Number.isInteger(pageNumber) && pageNumber > 0 ? pageNumber : 1,
+    limit:
+      Number.isInteger(limitNumber) && limitNumber > 0 && limitNumber <= 50
+        ? limitNumber
+        : 10,
+  };
+};
+
 // Valida que el estado solicitado sea permitido
 // y que no coincida con el estado actual.
 const validarCambioEstadoProducto = (productoExistente, nuevoEstado) => {
@@ -36,6 +50,53 @@ const validarCambioEstadoProducto = (productoExistente, nuevoEstado) => {
 /* =========================================================
    HELPERS DE BÚSQUEDA
 ========================================================= */
+
+// Construye el where administrativo de productos.
+// El buscador se limita a texto libre, mientras que
+// tipo, estado y genética se aplican como filtros exactos.
+const construirWhereProductos = ({
+  search = "",
+  tipo,
+  estado,
+  genetica,
+} = {}) => {
+  const filtros = [];
+
+  const searchNormalizado = search.trim();
+
+  if (searchNormalizado) {
+    filtros.push({
+      OR: [
+        {
+          nombre: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          descripcion: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+      ],
+    });
+  }
+
+  if (tipo) {
+    filtros.push({ tipo });
+  }
+
+  if (estado) {
+    filtros.push({ estado });
+  }
+
+  if (genetica) {
+    filtros.push({ genetica });
+  }
+
+  return filtros.length > 0 ? { AND: filtros } : undefined;
+};
 
 // Busca un producto por id y verifica que exista en la base de datos.
 const obtenerProductoPorId = async (productoId) => {
@@ -172,38 +233,45 @@ const obtenerPorcentajeThcFinal = (
    CRUD PRINCIPAL
 ========================================================= */
 
-export const getProductos = async (search = "") => {
-  const searchNormalizado = search.trim();
-  const searchEnum = searchNormalizado.toUpperCase();
+export const getProductos = async ({
+  search = "",
+  tipo,
+  estado,
+  genetica,
+  page = 1,
+  limit = 10,
+} = {}) => {
+  const paginacion = validarPaginacion(page, limit);
 
-  const filtros = searchNormalizado
-    ? [
-        {
-          nombre: { contains: searchNormalizado, mode: "insensitive" },
-        },
-        {
-          descripcion: { contains: searchNormalizado, mode: "insensitive" },
-        },
-      ]
-    : [];
-
-  if (["FLOR", "SEMILLA"].includes(searchEnum)) {
-    filtros.push({ tipo: { equals: searchEnum } });
-  }
-
-  if (["INDICA", "SATIVA", "HIBRIDA"].includes(searchEnum)) {
-    filtros.push({ genetica: { equals: searchEnum } });
-  }
-
-  if (["ACTIVO", "INACTIVO"].includes(searchEnum)) {
-    filtros.push({ estado: { equals: searchEnum } });
-  }
-
-  return prisma.producto.findMany({
-    where: filtros.length > 0 ? { OR: filtros } : undefined,
-    include: { stock: true },
-    orderBy: [{ estado: "asc" }, { fecha_creacion: "desc" }],
+  const where = construirWhereProductos({
+    search,
+    tipo,
+    estado,
+    genetica,
   });
+
+  const skip = (paginacion.page - 1) * paginacion.limit;
+
+  const [productos, total] = await prisma.$transaction([
+    prisma.producto.findMany({
+      where,
+      include: { stock: true },
+      orderBy: [{ estado: "asc" }, { fecha_creacion: "desc" }],
+      skip,
+      take: paginacion.limit,
+    }),
+    prisma.producto.count({ where }),
+  ]);
+
+  return {
+    data: productos,
+    pagination: {
+      page: paginacion.page,
+      limit: paginacion.limit,
+      total,
+      totalPages: Math.ceil(total / paginacion.limit),
+    },
+  };
 };
 
 export const crearProducto = async (datosProducto) => {
