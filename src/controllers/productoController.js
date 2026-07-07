@@ -7,15 +7,29 @@ import {
 
 import { asyncHandler } from "../utils/asyncHandler.js";
 
-// Obtiene productos registrados permitiendo aplicar búsqueda opcional para gestión administrativa.
+// Obtiene productos registrados permitiendo aplicar búsqueda, filtros y paginación administrativa.
 export const getProductosController = asyncHandler(async (req, res) => {
-  // Obtiene búsqueda opcional enviada mediante query params.
-  const { search } = req.query;
+  // Obtiene filtros opcionales enviados mediante query params.
+  const {
+    search = "",
+    tipo,
+    estado,
+    genetica,
+    page = 1,
+    limit = 10,
+  } = req.query;
 
-  // Consulta productos registrados aplicando filtro opcional.
-  const productos = await getProductos(search);
+  // Consulta productos registrados aplicando búsqueda, filtros y paginación.
+  const resultado = await getProductos({
+    search,
+    tipo,
+    estado,
+    genetica,
+    page,
+    limit,
+  });
 
-  return res.status(200).json(productos);
+  return res.status(200).json(resultado);
 });
 
 /**
