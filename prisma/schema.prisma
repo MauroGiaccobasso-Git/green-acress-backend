@@ -7,18 +7,19 @@ datasource db {
 }
 
 model Usuario {
-  id                  Int           @id @default(autoincrement())
-  email               String        @unique
+  id                  Int                @id @default(autoincrement())
+  email               String             @unique
   password_hash       String
-  intentos_fallidos   Int           @default(0)
+  intentos_fallidos   Int                @default(0)
   bloqueado_hasta     DateTime?
-  fecha_creacion      DateTime      @default(now())
-  fecha_actualizacion DateTime      @updatedAt
+  fecha_creacion      DateTime           @default(now())
+  fecha_actualizacion DateTime           @updatedAt
   rol                 RolUsuario
-  estado              EstadoUsuario @default(ACTIVO)
+  estado              EstadoUsuario      @default(ACTIVO)
   compras             Compra[]
   auditorias          Auditoria[]
   reservas            Reserva[]
+  historial_reservas  HistorialReserva[]
   socio               Socio?
   ventas              Venta[]
 }
@@ -134,6 +135,7 @@ model Venta {
   socio               Socio          @relation(fields: [socio_id], references: [id])
   usuario             Usuario        @relation(fields: [usuario_id], references: [id])
   detalles            VentaDetalle[]
+  reserva             Reserva?       @relation("ReservaVenta")
 }
 
 model VentaDetalle {
@@ -152,32 +154,39 @@ model Reserva {
   socio_id            Int
   usuario_id          Int
   fecha_solicitud     DateTime           @default(now())
-  fecha_limite_retiro DateTime
+  fecha_limite_retiro DateTime?
   estado              EstadoReserva      @default(PENDIENTE)
+  total               Float
+  venta_id            Int?               @unique
   observaciones       String?
   fecha_actualizacion DateTime           @updatedAt
   historial           HistorialReserva[]
   socio               Socio              @relation(fields: [socio_id], references: [id])
   usuario             Usuario            @relation(fields: [usuario_id], references: [id])
+  venta               Venta?             @relation("ReservaVenta", fields: [venta_id], references: [id])
   detalles            ReservaDetalle[]
 }
 
 model ReservaDetalle {
-  id          Int      @id @default(autoincrement())
-  reserva_id  Int
-  producto_id Int
-  cantidad    Float
-  producto    Producto @relation(fields: [producto_id], references: [id])
-  reserva     Reserva  @relation(fields: [reserva_id], references: [id])
+  id              Int      @id @default(autoincrement())
+  reserva_id      Int
+  producto_id     Int
+  cantidad        Float
+  precio_unitario Float
+  subtotal        Float
+  producto        Producto @relation(fields: [producto_id], references: [id])
+  reserva         Reserva  @relation(fields: [reserva_id], references: [id])
 }
 
 model HistorialReserva {
   id            Int           @id @default(autoincrement())
   reserva_id    Int
+  usuario_id    Int?
   estado        EstadoReserva
   fecha         DateTime      @default(now())
   observaciones String?
   reserva       Reserva       @relation(fields: [reserva_id], references: [id])
+  usuario       Usuario?      @relation(fields: [usuario_id], references: [id])
 }
 
 model Auditoria {
