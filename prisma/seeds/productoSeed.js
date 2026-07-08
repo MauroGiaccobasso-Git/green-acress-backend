@@ -7,7 +7,8 @@ Objetivo:
 - limpiar productos y stocks existentes;
 - cargar 10 flores y 10 semillas;
 - generar datos visuales suficientes para probar UI;
-- usar imágenes externas estables mediante Unsplash;
+- usar imágenes externas estables mediante Unsplash únicamente para productos tipo FLOR;
+- mantener productos tipo SEMILLA sin imagen y sin precio de venta, de acuerdo con las reglas del dominio;
 - permitir evaluar cards, filtros, búsqueda, estados y stock.
 
 Importante:
@@ -179,12 +180,12 @@ const products = [
   {
     nombre: "Semilla Amnesia Haze",
     descripcion: "Semilla feminizada de genética sativa.",
-    imagen_url: "https://images.unsplash.com/photo-1748608807231-2004f89a3d29?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "SATIVA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 250,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 30,
@@ -195,12 +196,12 @@ const products = [
   {
     nombre: "Semilla Northern Lights",
     descripcion: "Semilla feminizada de genética índica.",
-    imagen_url: "https://images.unsplash.com/photo-1498671546682-94a232c26d17?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "INDICA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 230,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 25,
@@ -211,12 +212,12 @@ const products = [
   {
     nombre: "Semilla Blue Dream",
     descripcion: "Semilla feminizada híbrida de perfil equilibrado.",
-    imagen_url: "https://images.unsplash.com/photo-1758552218642-588844d52458?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 240,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 18,
@@ -227,12 +228,12 @@ const products = [
   {
     nombre: "Semilla Gorilla Glue",
     descripcion: "Semilla híbrida de genética potente y alta demanda.",
-    imagen_url: "https://images.unsplash.com/photo-1776356829184-e00ba9e10eae?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 270,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 12,
@@ -243,12 +244,12 @@ const products = [
   {
     nombre: "Semilla OG Kush",
     descripcion: "Semilla híbrida de genética clásica.",
-    imagen_url: "https://images.unsplash.com/photo-1758122140959-44d5c710670a?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 260,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 22,
@@ -259,12 +260,12 @@ const products = [
   {
     nombre: "Semilla Critical Mass",
     descripcion: "Semilla índica de alta producción.",
-    imagen_url: "https://images.unsplash.com/photo-1672692751292-f5b0bd1d3f08?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "INDICA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 220,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 40,
@@ -275,12 +276,12 @@ const products = [
   {
     nombre: "Semilla Lemon Skunk",
     descripcion: "Semilla sativa con perfil cítrico.",
-    imagen_url: "https://images.unsplash.com/photo-1755427199677-ecf518e04737?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "SATIVA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 235,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 16,
@@ -291,12 +292,12 @@ const products = [
   {
     nombre: "Semilla White Widow",
     descripcion: "Semilla híbrida actualmente fuera del catálogo activo.",
-    imagen_url: "https://images.unsplash.com/photo-1758122140959-44d5c710670a?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "HIBRIDA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 245,
+    precio_venta_actual: null,
     estado: "INACTIVO",
     stock: {
       cantidad_total: 0,
@@ -307,12 +308,12 @@ const products = [
   {
     nombre: "Semilla Purple Punch",
     descripcion: "Semilla índica de perfil dulce y stock limitado.",
-    imagen_url: "https://images.unsplash.com/photo-1758552218642-588844d52458?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "INDICA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 255,
+    precio_venta_actual: null,
     estado: "ACTIVO",
     stock: {
       cantidad_total: 14,
@@ -323,12 +324,12 @@ const products = [
   {
     nombre: "Semilla Sour Diesel",
     descripcion: "Semilla sativa actualmente inactiva.",
-    imagen_url: "https://images.unsplash.com/photo-1741471596760-fe890227b18f?auto=format&fit=crop&w=600&h=600&q=80",
+    imagen_url: null,
     tipo: "SEMILLA",
     genetica: "SATIVA",
     porcentaje_thc: null,
     unidad_medida: "UNIDADES",
-    precio_venta_actual: 250,
+    precio_venta_actual: null,
     estado: "INACTIVO",
     stock: {
       cantidad_total: 8,
