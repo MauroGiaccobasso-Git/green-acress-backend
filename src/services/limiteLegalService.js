@@ -87,15 +87,31 @@ const calcularGramosVendidosMes = async (
 };
 
 // Calcula los gramos comprometidos por reservas confirmadas del socio.
-const calcularGramosReservadosConfirmadosMes = async () => {
-  /*
-    Según las reglas de negocio, el límite legal mensual debe considerar
-    tanto ventas registradas como reservas confirmadas.
+const calcularGramosReservadosConfirmadosMes = async (
+  socioId,
+  fechaReferencia,
+  tx = prisma,
+) => {
+  const { inicioMes, finMes } = obtenerRangoMes(fechaReferencia);
 
-    Este componente queda centralizado acá para mantener una única fuente
-    de verdad cuando el módulo Reservas consuma esta misma regla de dominio.
-  */
-  return 0;
+  const resultado = await tx.reservaDetalle.aggregate({
+    _sum: { cantidad: true },
+    where: {
+      reserva: {
+        socio_id: socioId,
+        estado: "CONFIRMADA",
+        fecha_solicitud: {
+          gte: inicioMes,
+          lt: finMes,
+        },
+      },
+      producto: {
+        tipo: "FLOR",
+      },
+    },
+  });
+
+  return resultado._sum.cantidad || 0;
 };
 
 export const calcularConsumoMensualSocio = async (
@@ -112,7 +128,11 @@ export const calcularConsumoMensualSocio = async (
   );
 
   const gramosReservadosConfirmados =
-    await calcularGramosReservadosConfirmadosMes();
+    await calcularGramosReservadosConfirmadosMes(
+      idSocio,
+      fechaReferencia,
+      tx,
+    );
 
   const gramosConsumidos = gramosVendidos + gramosReservadosConfirmados;
 
