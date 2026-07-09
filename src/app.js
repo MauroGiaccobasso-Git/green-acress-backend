@@ -1,10 +1,11 @@
 import "dotenv/config";
 
-
-import prisma from "./config/prisma.js";
-// Archivo principal del backend.
+// Librerías externas
 import express from "express";
 import cors from "cors";
+
+// Jobs
+import { iniciarReservationExpirationJob } from "./jobs/reservationExpirationJob.js";
 
 // Routes
 import homeRoutes from "./routes/homeRoutes.js";
@@ -16,6 +17,7 @@ import proveedorRoutes from "./routes/proveedorRoutes.js";
 import compraRoutes from "./routes/compraRoutes.js";
 import ventaRoutes from "./routes/ventaRoutes.js";
 import stockRoutes from "./routes/stockRoutes.js";
+import reservaRoutes from "./routes/reservaRoutes.js";
 
 // Middlewares
 import { errorHandler } from "./middlewares/errorHandler.js";
@@ -44,7 +46,7 @@ app.use("/proveedores", proveedorRoutes);
 app.use("/compras", compraRoutes);
 app.use("/ventas", ventaRoutes);
 app.use("/stock", stockRoutes);
-
+app.use("/reservas", reservaRoutes);
 
 // Middleware global para manejo centralizado de errores.
 app.use(errorHandler);
@@ -52,4 +54,7 @@ app.use(errorHandler);
 // Inicia servidor HTTP.
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
+
+  // Inicializa los procesos automáticos del sistema.
+  iniciarReservationExpirationJob();
 });
