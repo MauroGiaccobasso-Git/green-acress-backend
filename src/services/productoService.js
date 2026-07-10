@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
+import { registrarAuditoria } from "./auditoriaService.js";
 
 /* =========================================================
    VALIDACIONES GENERALES
@@ -14,6 +15,17 @@ const validarIdProducto = (id) => {
   }
 
   return productoId;
+};
+
+// Convierte y valida el usuario administrador responsable.
+const validarIdUsuario = (id) => {
+  const usuarioId = Number(id);
+
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
+    throw new AppError("El usuario administrador es obligatorio", 400);
+  }
+
+  return usuarioId;
 };
 
 // Normaliza y valida los parámetros de paginación administrativa.
@@ -49,6 +61,85 @@ const validarCambioEstadoProducto = (productoExistente, nuevoEstado) => {
 
 /* =========================================================
    HELPERS DE BÚSQUEDA
+========================================================= */
+
+// Busca un producto por id y verifica que exista en la base de datos.
+const obtenerProductoPorId = async (productoId, tx = prisma) => {
+  const productoExistente = await tx.producto.findUnique({
+    where: { id: productoId },
+  });
+
+  if (!productoExistente) {
+    throw new AppError("El producto indicado no existe", 404);
+  }
+
+  return productoExistente;
+};
+
+/* =========================================================
+   VALIDACIONES DE NEGOCIO
+========================================================= */
+
+// Valida que el nombre del producto no esté vacío
+// y que no exista otro producto registrado con el mismo nombre.
+const validarNombreProducto = async (
+  { nombre, productoId = null, obligatorio = false },
+  tx = prisma,
+) => {
+  if (obligatorio && (nombre === undefined || nombre === null)) {
+    throw new AppError("El nombre del producto es obligatorio", 400);
+  }
+
+  if (nombre === undefined) {
+    return;
+  }
+
+  if (typeof nombre !== "string" || !nombre.trim()) {
+    throw new AppError("El nombre del producto es obligatorio", 400);
+  }
+
+  const productoDuplicado = await tx.producto.findFirst({
+    where: {
+      nombre: {
+        equals: nombre,
+        mode: "insensitive",
+      },
+      NOT: productoId ? { id: productoId } : undefined,
+    },
+  });
+
+  if (productoDuplicado) {
+    throw new AppError(
+      "Ya existe otro producto registrado con ese nombre",
+      409,
+    );
+  }
+};
+
+// Verifica que el tipo del producto no pueda modificarse luego de creado.
+const validarTipoInmutable = (tipo, productoExistente) => {
+  if (tipo !== undefined && tipo !== productoExistente.tipo) {
+    throw new AppError(
+      "No se puede modificar el tipo de un producto existente",
+      400,
+    );
+  }
+};
+
+// Valida que el precio de venta exista y sea mayor a cero.
+const validarPrecioProducto = (precioVentaActual) => {
+  if (
+    precioVentaActual === undefined ||
+    precioVentaActual === null ||
+    Number.isNaN(Number(precioVentaActual)) ||
+    Number(precioVentaActual) <= 0
+  ) {
+    throw new AppError("El precio de venta debe ser mayor a cero", 400);
+  }
+};
+
+/* =========================================================
+   HELPERS DE FILTROS
 ========================================================= */
 
 // Construye el where administrativo de productos.
@@ -98,80 +189,19 @@ const construirWhereProductos = ({
   return filtros.length > 0 ? { AND: filtros } : undefined;
 };
 
-// Busca un producto por id y verifica que exista en la base de datos.
-const obtenerProductoPorId = async (productoId) => {
-  const productoExistente = await prisma.producto.findUnique({
-    where: { id: productoId },
-  });
-
-  if (!productoExistente) {
-    throw new AppError("El producto indicado no existe", 404);
-  }
-
-  return productoExistente;
-};
-
-/* =========================================================
-   VALIDACIONES DE NEGOCIO
-========================================================= */
-
-// Valida que el nombre del producto no esté vacío
-// y que no exista otro producto registrado con el mismo nombre.
-const validarNombreProducto = async (nombre, productoId) => {
-  if (nombre !== undefined && !nombre.trim()) {
-    throw new AppError("El nombre del producto es obligatorio", 400);
-  }
-
-  if (nombre !== undefined) {
-    const productoDuplicado = await prisma.producto.findFirst({
-      where: {
-        nombre: {
-          equals: nombre,
-          mode: "insensitive",
-        },
-        NOT: productoId ? { id: productoId } : undefined,
-      },
-    });
-
-    if (productoDuplicado) {
-      throw new AppError(
-        "Ya existe otro producto registrado con ese nombre",
-        409,
-      );
-    }
-  }
-};
-
-// Verifica que el tipo del producto no pueda modificarse luego de creado.
-const validarTipoInmutable = (tipo, productoExistente) => {
-  if (tipo !== undefined && tipo !== productoExistente.tipo) {
-    throw new AppError(
-      "No se puede modificar el tipo de un producto existente",
-      400,
-    );
-  }
-};
-
-// Valida que el precio de venta exista y sea mayor a cero.
-const validarPrecioProducto = (precio_venta_actual) => {
-  if (
-    precio_venta_actual === undefined ||
-    precio_venta_actual === null ||
-    Number.isNaN(Number(precio_venta_actual)) ||
-    Number(precio_venta_actual) <= 0
-  ) {
-    throw new AppError("El precio de venta debe ser mayor a cero", 400);
-  }
-};
-
 /* =========================================================
    HELPERS DE TRANSFORMACIÓN
 ========================================================= */
 
 // Determina automáticamente la unidad de medida según el tipo de producto.
 const obtenerUnidadMedidaPorTipo = (tipo) => {
-  if (tipo === "FLOR") return "GRAMOS";
-  if (tipo === "SEMILLA") return "UNIDADES";
+  if (tipo === "FLOR") {
+    return "GRAMOS";
+  }
+
+  if (tipo === "SEMILLA") {
+    return "UNIDADES";
+  }
 
   throw new AppError("Tipo de producto inválido", 400);
 };
@@ -229,8 +259,223 @@ const obtenerPorcentajeThcFinal = (
   return porcentajeThcFinal;
 };
 
+// Construye los datos finales necesarios para registrar un producto.
+const construirDatosCreacionProducto = (datosProducto) => {
+  const {
+    nombre,
+    descripcion,
+    imagen_url,
+    tipo,
+    genetica,
+    porcentaje_thc,
+    precio_venta_actual,
+  } = datosProducto;
+
+  const unidadMedida = obtenerUnidadMedidaPorTipo(tipo);
+
+  if (!genetica) {
+    throw new AppError("Genética obligatoria", 400);
+  }
+
+  if (tipo === "FLOR") {
+    const thcNumerico = Number(porcentaje_thc);
+
+    if (
+      porcentaje_thc === undefined ||
+      porcentaje_thc === null ||
+      Number.isNaN(thcNumerico) ||
+      thcNumerico <= 0 ||
+      thcNumerico > 100
+    ) {
+      throw new AppError("THC inválido", 400);
+    }
+
+    validarPrecioProducto(precio_venta_actual);
+  }
+
+  if (tipo === "SEMILLA") {
+    if (porcentaje_thc !== null && porcentaje_thc !== undefined) {
+      throw new AppError("SEMILLA no permite THC", 400);
+    }
+
+    if (precio_venta_actual !== null && precio_venta_actual !== undefined) {
+      throw new AppError("SEMILLA no debe registrar precio de venta", 400);
+    }
+  }
+
+  return {
+    nombre,
+    descripcion,
+    imagen_url,
+    tipo,
+    genetica,
+    porcentaje_thc: tipo === "FLOR" ? Number(porcentaje_thc) : null,
+    unidad_medida: unidadMedida,
+    precio_venta_actual:
+      tipo === "FLOR" ? Number(precio_venta_actual) : null,
+  };
+};
+
+// Construye los datos finales necesarios para actualizar un producto.
+const construirDatosActualizacionProducto = (
+  datosProducto,
+  productoExistente,
+) => {
+  const {
+    nombre,
+    descripcion,
+    imagen_url,
+    genetica,
+    precio_venta_actual,
+  } = datosProducto;
+
+  const tipoFinal = productoExistente.tipo;
+
+  const geneticaFinal = obtenerGeneticaFinal(
+    genetica,
+    productoExistente,
+  );
+
+  const porcentajeThcFinal = obtenerPorcentajeThcFinal(
+    datosProducto,
+    productoExistente,
+    tipoFinal,
+  );
+
+  // El precio de venta solo aplica a productos tipo FLOR.
+  // Para SEMILLA se conserva siempre en null porque no se comercializa a socios.
+  let precioVentaFinal = productoExistente.precio_venta_actual;
+
+  if (tipoFinal === "FLOR" && precio_venta_actual !== undefined) {
+    validarPrecioProducto(precio_venta_actual);
+    precioVentaFinal = Number(precio_venta_actual);
+  }
+
+  if (tipoFinal === "SEMILLA") {
+    if (precio_venta_actual !== null && precio_venta_actual !== undefined) {
+      throw new AppError("SEMILLA no debe registrar precio de venta", 400);
+    }
+
+    precioVentaFinal = null;
+  }
+
+  return {
+    nombre,
+    descripcion,
+    imagen_url,
+    genetica: geneticaFinal,
+    porcentaje_thc: porcentajeThcFinal,
+    unidad_medida: productoExistente.unidad_medida,
+    precio_venta_actual: precioVentaFinal,
+  };
+};
+
 /* =========================================================
-   CRUD PRINCIPAL
+   HELPERS DE PERSISTENCIA
+========================================================= */
+
+// Registra el producto junto con su stock inicial.
+const crearProductoPersistencia = async (datosProducto, tx) => {
+  return tx.producto.create({
+    data: {
+      ...datosProducto,
+      stock: {
+        create: {},
+      },
+    },
+    include: {
+      stock: true,
+    },
+  });
+};
+
+// Actualiza únicamente los datos editables del producto.
+const actualizarProductoPersistencia = async (
+  productoId,
+  datosProducto,
+  tx,
+) => {
+  return tx.producto.update({
+    where: {
+      id: productoId,
+    },
+    data: datosProducto,
+    include: {
+      stock: true,
+    },
+  });
+};
+
+// Actualiza el estado lógico del producto.
+const actualizarEstadoProductoPersistencia = async (
+  productoId,
+  nuevoEstado,
+  tx,
+) => {
+  return tx.producto.update({
+    where: {
+      id: productoId,
+    },
+    data: {
+      estado: nuevoEstado,
+    },
+    include: {
+      stock: true,
+    },
+  });
+};
+
+/* =========================================================
+   OPERACIONES INTERNAS
+========================================================= */
+
+// Registra auditoría administrativa por alta de producto.
+const auditarCreacionProducto = async ({ usuarioId, producto }, tx) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CREAR_PRODUCTO",
+      entidad: "Producto",
+      entidadId: producto.id,
+      detalle: `Producto ${producto.nombre} creado como ${producto.tipo}.`,
+    },
+    tx,
+  );
+};
+
+// Registra auditoría administrativa por modificación de producto.
+const auditarModificacionProducto = async ({ usuarioId, producto }, tx) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "ACTUALIZAR_PRODUCTO",
+      entidad: "Producto",
+      entidadId: producto.id,
+      detalle: `Producto ${producto.nombre} actualizado.`,
+    },
+    tx,
+  );
+};
+
+// Registra auditoría administrativa por cambio de estado.
+const auditarCambioEstadoProducto = async (
+  { usuarioId, producto, estadoAnterior },
+  tx,
+) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CAMBIAR_ESTADO_PRODUCTO",
+      entidad: "Producto",
+      entidadId: producto.id,
+      detalle: `Producto ${producto.nombre} cambió de ${estadoAnterior} a ${producto.estado}.`,
+    },
+    tx,
+  );
+};
+
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
 ========================================================= */
 
 export const getProductos = async ({
@@ -255,12 +500,23 @@ export const getProductos = async ({
   const [productos, total] = await prisma.$transaction([
     prisma.producto.findMany({
       where,
-      include: { stock: true },
-      orderBy: [{ estado: "asc" }, { fecha_creacion: "desc" }],
+      include: {
+        stock: true,
+      },
+      orderBy: [
+        {
+          estado: "asc",
+        },
+        {
+          fecha_creacion: "desc",
+        },
+      ],
       skip,
       take: paginacion.limit,
     }),
-    prisma.producto.count({ where }),
+    prisma.producto.count({
+      where,
+    }),
   ]);
 
   return {
@@ -274,132 +530,128 @@ export const getProductos = async ({
   };
 };
 
-export const crearProducto = async (datosProducto) => {
-  const {
-    nombre,
-    descripcion,
-    imagen_url,
-    tipo,
-    genetica,
-    porcentaje_thc,
-    precio_venta_actual,
-  } = datosProducto;
+/* =========================================================
+   OPERACIONES DEL MÓDULO
+========================================================= */
 
-  await validarNombreProducto(nombre);
+export const crearProducto = async ({ datosProducto, usuarioId }) => {
+  const idUsuario = validarIdUsuario(usuarioId);
 
-  const unidad_medida = obtenerUnidadMedidaPorTipo(tipo);
+  return prisma.$transaction(async (tx) => {
+    await validarNombreProducto(
+      {
+        nombre: datosProducto.nombre,
+        obligatorio: true,
+      },
+      tx,
+    );
 
-  if (!genetica) {
-    throw new AppError("Genética obligatoria", 400);
-  }
+    const datosCreacion =
+      construirDatosCreacionProducto(datosProducto);
 
-  if (tipo === "FLOR") {
-    const thc = Number(porcentaje_thc);
+    const producto = await crearProductoPersistencia(
+      datosCreacion,
+      tx,
+    );
 
-    if (!porcentaje_thc || thc <= 0 || thc > 100) {
-      throw new AppError("THC inválido", 400);
-    }
+    await auditarCreacionProducto(
+      {
+        usuarioId: idUsuario,
+        producto,
+      },
+      tx,
+    );
 
-    validarPrecioProducto(precio_venta_actual);
-  }
-
-  if (tipo === "SEMILLA") {
-    if (porcentaje_thc != null) {
-      throw new AppError("SEMILLA no permite THC", 400);
-    }
-
-    if (precio_venta_actual != null) {
-      throw new AppError("SEMILLA no debe registrar precio de venta", 400);
-    }
-  }
-
-  const precioVentaFinal = tipo === "FLOR" ? Number(precio_venta_actual) : null;
-
-  return prisma.producto.create({
-    data: {
-      nombre,
-      descripcion,
-      imagen_url,
-      tipo,
-      genetica,
-      porcentaje_thc: tipo === "FLOR" ? Number(porcentaje_thc) : null,
-      unidad_medida,
-      precio_venta_actual: precioVentaFinal,
-      stock: { create: {} },
-    },
-    include: { stock: true },
+    return producto;
   });
 };
 
-export const actualizarProducto = async (id, datosProducto) => {
-  const productoId = validarIdProducto(id);
-  const productoExistente = await obtenerProductoPorId(productoId);
+export const actualizarProducto = async ({
+  productoId,
+  datosProducto,
+  usuarioId,
+}) => {
+  const idProducto = validarIdProducto(productoId);
+  const idUsuario = validarIdUsuario(usuarioId);
 
-  const {
-    nombre,
-    descripcion,
-    imagen_url,
-    tipo,
-    genetica,
-    precio_venta_actual,
-  } = datosProducto;
+  return prisma.$transaction(async (tx) => {
+    const productoExistente = await obtenerProductoPorId(
+      idProducto,
+      tx,
+    );
 
-  validarTipoInmutable(tipo, productoExistente);
-  await validarNombreProducto(nombre, productoId);
+    validarTipoInmutable(
+      datosProducto.tipo,
+      productoExistente,
+    );
 
-  const tipoFinal = productoExistente.tipo;
+    await validarNombreProducto(
+      {
+        nombre: datosProducto.nombre,
+        productoId: idProducto,
+      },
+      tx,
+    );
 
-  const geneticaFinal = obtenerGeneticaFinal(genetica, productoExistente);
+    const datosActualizacion =
+      construirDatosActualizacionProducto(
+        datosProducto,
+        productoExistente,
+      );
 
-  const porcentajeThcFinal = obtenerPorcentajeThcFinal(
-    datosProducto,
-    productoExistente,
-    tipoFinal,
-  );
+    const producto = await actualizarProductoPersistencia(
+      idProducto,
+      datosActualizacion,
+      tx,
+    );
 
-  // El precio de venta solo aplica a productos tipo FLOR.
-  // Para SEMILLA se conserva siempre en null porque no se comercializa a socios.
-  let precioVentaFinal = productoExistente.precio_venta_actual;
+    await auditarModificacionProducto(
+      {
+        usuarioId: idUsuario,
+        producto,
+      },
+      tx,
+    );
 
-  if (tipoFinal === "FLOR") {
-    if (precio_venta_actual !== undefined) {
-      validarPrecioProducto(precio_venta_actual);
-      precioVentaFinal = Number(precio_venta_actual);
-    }
-  }
-
-  if (tipoFinal === "SEMILLA") {
-    if (precio_venta_actual != null) {
-      throw new AppError("SEMILLA no debe registrar precio de venta", 400);
-    }
-
-    precioVentaFinal = null;
-  }
-
-  return prisma.producto.update({
-    where: { id: productoId },
-    data: {
-      nombre,
-      descripcion,
-      imagen_url,
-      genetica: geneticaFinal,
-      porcentaje_thc: porcentajeThcFinal,
-      unidad_medida: productoExistente.unidad_medida,
-      precio_venta_actual: precioVentaFinal,
-    },
-    include: { stock: true },
+    return producto;
   });
 };
 
-export const actualizarEstadoProducto = async (id, nuevoEstado) => {
-  const productoId = validarIdProducto(id);
-  const productoExistente = await obtenerProductoPorId(productoId);
+export const actualizarEstadoProducto = async ({
+  productoId,
+  nuevoEstado,
+  usuarioId,
+}) => {
+  const idProducto = validarIdProducto(productoId);
+  const idUsuario = validarIdUsuario(usuarioId);
 
-  validarCambioEstadoProducto(productoExistente, nuevoEstado);
+  return prisma.$transaction(async (tx) => {
+    const productoExistente = await obtenerProductoPorId(
+      idProducto,
+      tx,
+    );
 
-  return prisma.producto.update({
-    where: { id: productoId },
-    data: { estado: nuevoEstado },
-    include: { stock: true },
+    validarCambioEstadoProducto(
+      productoExistente,
+      nuevoEstado,
+    );
+
+    const producto =
+      await actualizarEstadoProductoPersistencia(
+        idProducto,
+        nuevoEstado,
+        tx,
+      );
+
+    await auditarCambioEstadoProducto(
+      {
+        usuarioId: idUsuario,
+        producto,
+        estadoAnterior: productoExistente.estado,
+      },
+      tx,
+    );
+
+    return producto;
   });
 };
