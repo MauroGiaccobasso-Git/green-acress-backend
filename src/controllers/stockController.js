@@ -63,6 +63,7 @@ export const getMovimientosStockController = asyncHandler(async (req, res) => {
 export const ajustarStockController = asyncHandler(async (req, res) => {
   const stock = await ajustarStock({
     productoId: req.params.productoId,
+    usuarioId: req.usuario.id,
     variacion: req.body.variacion,
     observaciones: req.body.observaciones,
   });
