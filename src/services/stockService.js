@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { registrarAuditoria } from "./auditoriaService.js";
 import { AppError } from "../utils/appError.js";
 
 /* =========================================================
@@ -287,6 +288,42 @@ const registrarMovimientoStock = async (
 };
 
 /* =========================================================
+   HELPERS DE AUDITORÍA
+========================================================= */
+
+// Registra la trazabilidad administrativa de un ajuste manual de stock.
+// Complementa al MovimientoStock identificando al administrador responsable.
+const auditarAjusteManualStock = async (
+  {
+    usuarioId,
+    producto,
+    variacion,
+    stockAnterior,
+    stockResultante,
+    observaciones,
+  },
+  tx,
+) => {
+  const variacionConSigno = variacion > 0 ? `+${variacion}` : `${variacion}`;
+
+  return registrarAuditoria(
+    {
+      usuarioId,
+      accion: "AJUSTAR_STOCK",
+      entidad: "Stock",
+      entidadId: producto.id,
+      detalle:
+        `Se realizó un ajuste manual de stock sobre el producto "${producto.nombre}". ` +
+        `Variación aplicada: ${variacionConSigno}. ` +
+        `Stock anterior: ${stockAnterior}. ` +
+        `Stock resultante: ${stockResultante}. ` +
+        `Motivo: ${observaciones}.`,
+    },
+    tx,
+  );
+};
+
+/* =========================================================
    OPERACIONES INTERNAS
 ========================================================= */
 
@@ -495,7 +532,7 @@ export const getMovimientosStock = async ({
 ========================================================= */
 
 // Incrementa el stock total y disponible.
-// Uso esperado: compras o ingresos manuales.
+// Uso esperado: compras o ingresos gestionados por módulos propietarios.
 export const incrementarStock = async (
   { productoId, cantidad, referenciaTipo = null, referenciaId = null },
   txExterna = null,
@@ -532,7 +569,7 @@ export const incrementarStock = async (
 };
 
 // Descuenta stock total y disponible.
-// Uso esperado: ventas o egresos manuales.
+// Uso esperado: ventas o egresos gestionados por módulos propietarios.
 export const descontarStock = async (
   { productoId, cantidad, referenciaTipo = null, referenciaId = null },
   txExterna = null,
@@ -649,10 +686,11 @@ export const liberarStockReservado = async (
 };
 
 // Ajusta manualmente el stock mediante una variación positiva o negativa.
-// Uso esperado: correcciones administrativas de inventario.
+// Registra de forma atómica el stock, el movimiento de inventario y la auditoría.
 export const ajustarStock = async (
   {
     productoId,
+    usuarioId,
     variacion,
     referenciaTipo = "AJUSTE_MANUAL",
     referenciaId = null,
@@ -692,6 +730,18 @@ export const ajustarStock = async (
         cantidad: variacionNumerica,
         referenciaTipo,
         referenciaId,
+        observaciones: observacionesAjuste,
+      },
+      tx,
+    );
+
+    await auditarAjusteManualStock(
+      {
+        usuarioId,
+        producto: stockActual.producto,
+        variacion: variacionNumerica,
+        stockAnterior: stockActual.cantidad_total,
+        stockResultante,
         observaciones: observacionesAjuste,
       },
       tx,
