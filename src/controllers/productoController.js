@@ -36,8 +36,11 @@ export const getProductosController = asyncHandler(async (req, res) => {
  * Controller encargado de registrar un nuevo producto.
  */
 export const crearProductoController = asyncHandler(async (req, res) => {
-  // Envía los datos recibidos al service.
-  const nuevoProducto = await crearProducto(req.body);
+  // Envía los datos del producto y el usuario autenticado al service.
+  const nuevoProducto = await crearProducto({
+    datosProducto: req.body,
+    usuarioId: req.usuario.id,
+  });
 
   // Retorna respuesta exitosa con el producto creado.
   return res.status(201).json({
@@ -50,9 +53,15 @@ export const crearProductoController = asyncHandler(async (req, res) => {
  * Controller encargado de actualizar los datos editables de un producto existente.
  */
 export const actualizarProductoController = asyncHandler(async (req, res) => {
-  const productoActualizado = await actualizarProducto(req.params.id, req.body);
+  // Envía el identificador, los datos editables y el usuario autenticado al service.
+  const productoActualizado = await actualizarProducto({
+    productoId: req.params.id,
+    datosProducto: req.body,
+    usuarioId: req.usuario.id,
+  });
 
-  res.status(200).json({
+  // Retorna respuesta exitosa con el producto actualizado.
+  return res.status(200).json({
     message: "Producto actualizado correctamente",
     producto: productoActualizado,
   });
@@ -61,12 +70,15 @@ export const actualizarProductoController = asyncHandler(async (req, res) => {
 // Permite modificar el estado lógico de un producto existente.
 export const actualizarEstadoProductoController = asyncHandler(
   async (req, res) => {
-    const producto = await actualizarEstadoProducto(
-      req.params.id,
-      req.body.estado,
-    );
+    // Envía el identificador, el nuevo estado y el usuario autenticado al service.
+    const producto = await actualizarEstadoProducto({
+      productoId: req.params.id,
+      nuevoEstado: req.body.estado,
+      usuarioId: req.usuario.id,
+    });
 
-    res.status(200).json({
+    // Retorna respuesta exitosa con el producto actualizado.
+    return res.status(200).json({
       message: "Estado del producto actualizado correctamente",
       producto,
     });
