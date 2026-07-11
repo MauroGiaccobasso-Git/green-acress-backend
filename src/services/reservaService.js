@@ -774,14 +774,34 @@ const bloquearStockReserva = async (detallesCalculados, reservaId, tx) => {
   }
 };
 
-const liberarStockReserva = async (detallesReserva, reservaId, tx) => {
+/*
+  Libera el stock comprometido por una reserva y registra
+  el evento funcional que originó la liberación.
+
+  La operación técnica continúa siendo liberar stock reservado,
+  pero MovimientoStock debe persistir el evento de negocio real:
+  - RESERVA_CANCELADA;
+  - RESERVA_VENCIDA.
+
+  Esto evita exponer LIBERACION_RESERVA como una operación
+  administrativa independiente.
+*/
+const liberarStockReserva = async (
+  detallesReserva,
+  reservaId,
+  tipoMovimiento,
+  motivoLiberacion,
+  tx,
+) => {
   for (const detalle of detallesReserva) {
     await liberarStockReservado(
       {
         productoId: detalle.producto_id,
         cantidad: detalle.cantidad,
+        tipoMovimiento,
         referenciaTipo: "RESERVA",
         referenciaId: reservaId,
+        observaciones: motivoLiberacion,
       },
       tx,
     );
@@ -1136,7 +1156,13 @@ export const cancelarReserva = async ({
     validarReservaCancelable(reserva);
 
     if (reserva.estado === "CONFIRMADA") {
-      await liberarStockReserva(reserva.detalles, idReserva, tx);
+      await liberarStockReserva(
+        reserva.detalles,
+        idReserva,
+        "RESERVA_CANCELADA",
+        "Stock liberado por cancelación de reserva.",
+        tx,
+      );
     }
 
     await actualizarEstadoReserva(
@@ -1195,7 +1221,13 @@ export const vencerReservasExpiradas = async () => {
 
   for (const reserva of reservasVencidas) {
     const reservaProcesada = await prisma.$transaction(async (tx) => {
-      await liberarStockReserva(reserva.detalles, reserva.id, tx);
+      await liberarStockReserva(
+        reserva.detalles,
+        reserva.id,
+        "RESERVA_VENCIDA",
+        "Stock liberado por vencimiento de reserva.",
+        tx,
+      );
 
       await actualizarEstadoReserva(
         {
