@@ -1,6 +1,10 @@
 import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
-import { reservarStock, liberarStockReservado } from "./stockService.js";
+import {
+  reservarStock,
+  liberarStockReservado,
+  consumirStockReservado,
+} from "./stockService.js";
 import {
   registrarAuditoria,
   registrarAuditoriaSistema,
@@ -414,6 +418,25 @@ const validarReservaCancelable = (reserva) => {
   }
 };
 
+// Valida que una reserva pueda completar su retiro presencial.
+// La operación solo aplica sobre reservas confirmadas y todavía no convertidas.
+const validarReservaRetirable = (reserva) => {
+  if (reserva.estado !== "CONFIRMADA") {
+    throw new AppError(
+      "Solo se puede confirmar el retiro de reservas confirmadas",
+      400,
+    );
+  }
+
+  if (reserva.venta_id !== null) {
+    throw new AppError("La reserva ya fue convertida en una venta", 400);
+  }
+
+  if (!Array.isArray(reserva.detalles) || reserva.detalles.length === 0) {
+    throw new AppError("La reserva no contiene productos para retirar", 400);
+  }
+};
+
 /* =========================================================
    HELPERS DE FILTROS
 ========================================================= */
@@ -658,6 +681,54 @@ const actualizarEstadoReserva = async (
   });
 };
 
+// Crea la venta asociada utilizando exclusivamente la información histórica
+// congelada en la reserva y sus detalles.
+const crearVentaDesdeReserva = async (
+  { reserva, usuarioId, observaciones },
+  tx,
+) => {
+  return tx.venta.create({
+    data: {
+      socio_id: reserva.socio_id,
+      usuario_id: usuarioId,
+      total: reserva.total,
+      observaciones,
+      detalles: {
+        create: reserva.detalles.map((detalle) => ({
+          producto_id: detalle.producto_id,
+          cantidad: detalle.cantidad,
+          precio_unitario: detalle.precio_unitario,
+          subtotal: detalle.subtotal,
+        })),
+      },
+    },
+  });
+};
+
+// Finaliza la reserva y la vincula con la venta generada.
+// El update condicional evita que dos solicitudes concurrentes
+// puedan convertir la misma reserva más de una vez.
+const finalizarReservaConVenta = async ({ reservaId, ventaId }, tx) => {
+  const resultado = await tx.reserva.updateMany({
+    where: {
+      id: reservaId,
+      estado: "CONFIRMADA",
+      venta_id: null,
+    },
+    data: {
+      estado: "FINALIZADA",
+      venta_id: ventaId,
+    },
+  });
+
+  if (resultado.count !== 1) {
+    throw new AppError(
+      "La reserva ya fue procesada o no se encuentra disponible para retiro",
+      400,
+    );
+  }
+};
+
 /* =========================================================
    OPERACIONES INTERNAS
 ========================================================= */
@@ -711,6 +782,22 @@ const liberarStockReserva = async (detallesReserva, reservaId, tx) => {
         cantidad: detalle.cantidad,
         referenciaTipo: "RESERVA",
         referenciaId: reservaId,
+      },
+      tx,
+    );
+  }
+};
+
+// Consume el stock previamente reservado cuando se registra el retiro.
+// El movimiento queda asociado a la Venta porque representa una salida física.
+const consumirStockReservaRetirada = async (detallesReserva, ventaId, tx) => {
+  for (const detalle of detallesReserva) {
+    await consumirStockReservado(
+      {
+        productoId: detalle.producto_id,
+        cantidad: detalle.cantidad,
+        referenciaTipo: "VENTA",
+        referenciaId: ventaId,
       },
       tx,
     );
@@ -798,6 +885,26 @@ const auditarSolicitudReserva = async (
       entidad: "Reserva",
       entidadId: reservaId,
       detalle: `Reserva solicitada por ${socio.nombre} ${socio.apellido}. Total: ${totalReserva}. Gramos: ${gramosReserva}.`,
+    },
+    tx,
+  );
+};
+
+// Registra la trazabilidad administrativa del retiro presencial
+// y de la conversión de la reserva en venta.
+const auditarRetiroReserva = async (
+  { usuarioId, reservaId, ventaId, socio },
+  tx,
+) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CONVERTIR_RESERVA_EN_VENTA",
+      entidad: "Reserva",
+      entidadId: reservaId,
+      detalle:
+        `Reserva #${reservaId} retirada presencialmente por ` +
+        `${socio.nombre} ${socio.apellido} y convertida en Venta #${ventaId}.`,
     },
     tx,
   );
@@ -954,6 +1061,64 @@ export const solicitarReserva = async ({
     );
 
     return obtenerReservaCompletaPorId(reserva.id, tx);
+  });
+};
+
+export const confirmarRetiroReserva = async ({
+  reservaId,
+  usuarioId,
+  observaciones = null,
+}) => {
+  const idReserva = validarIdReserva(reservaId);
+  const idUsuario = validarIdUsuario(usuarioId);
+
+  return prisma.$transaction(async (tx) => {
+    const reserva = await obtenerReservaParaCambioEstado(idReserva, tx);
+
+    validarReservaRetirable(reserva);
+
+    const venta = await crearVentaDesdeReserva(
+      {
+        reserva,
+        usuarioId: idUsuario,
+        observaciones,
+      },
+      tx,
+    );
+
+    await finalizarReservaConVenta(
+      {
+        reservaId: idReserva,
+        ventaId: venta.id,
+      },
+      tx,
+    );
+
+    await consumirStockReservaRetirada(reserva.detalles, venta.id, tx);
+
+    await registrarHistorialReserva(
+      {
+        reservaId: idReserva,
+        usuarioId: idUsuario,
+        estado: "FINALIZADA",
+        observaciones:
+          observaciones ||
+          `Retiro presencial confirmado. Reserva convertida en Venta #${venta.id}.`,
+      },
+      tx,
+    );
+
+    await auditarRetiroReserva(
+      {
+        usuarioId: idUsuario,
+        reservaId: idReserva,
+        ventaId: venta.id,
+        socio: reserva.socio,
+      },
+      tx,
+    );
+
+    return obtenerReservaCompletaPorId(idReserva, tx);
   });
 };
 
