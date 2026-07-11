@@ -39,11 +39,16 @@ export const getInventarioController = asyncHandler(async (req, res) => {
 });
 
 // Lista los movimientos de stock para trazabilidad administrativa.
+//
+// El filtro evento_reserva permite distinguir variantes funcionales
+// dentro de los movimientos asociados a una reserva sin modificar
+// el contrato general de referencia_tipo = RESERVA.
 export const getMovimientosStockController = asyncHandler(async (req, res) => {
   const resultado = await getMovimientosStock({
     search: req.query.search,
     tipo: req.query.tipo,
     referenciaTipo: req.query.referencia_tipo,
+    eventoReserva: req.query.evento_reserva,
     productoId: req.query.producto_id,
     fechaDesde: req.query.fecha_desde,
     fechaHasta: req.query.fecha_hasta,

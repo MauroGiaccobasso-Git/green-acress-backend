@@ -10,6 +10,12 @@ const MAX_OBSERVACIONES_AJUSTE_LENGTH = 500;
 const MAX_VARIACION_AJUSTE = 10000;
 const MAX_DECIMALES_GRAMOS = 2;
 
+const EVENTOS_RESERVA_MOVIMIENTO_VALIDOS = [
+  "CONFIRMADA",
+  "CANCELADA",
+  "VENCIDA",
+];
+
 /* =========================================================
    VALIDACIONES GENERALES
 ========================================================= */
@@ -111,6 +117,22 @@ const validarPaginacion = ({ page = 1, limit = 5 } = {}) => {
   };
 };
 
+/*
+  Valida el evento funcional de reserva utilizado
+  para filtrar movimientos de inventario.
+
+  Este filtro no modifica los enums persistidos en
+  MovimientoStock: traduce un criterio orientado al
+  usuario a los campos técnicos ya existentes.
+*/
+const validarEventoReservaMovimiento = (eventoReserva) => {
+  if (!EVENTOS_RESERVA_MOVIMIENTO_VALIDOS.includes(eventoReserva)) {
+    throw new AppError("El evento de reserva indicado no es válido", 400);
+  }
+
+  return eventoReserva;
+};
+
 /* =========================================================
    HELPERS
 ========================================================= */
@@ -148,11 +170,47 @@ const construirFiltrosInventario = ({ search, tipo, estado } = {}) => ({
   },
 });
 
+/*
+  Construye el filtro técnico correspondiente a un evento
+  funcional del ciclo de vida de una reserva.
+
+  Cada evento funcional posee su propio tipo de movimiento
+  de stock, evitando depender de observaciones técnicas para
+  identificar la operación realizada.
+*/
+const construirFiltroEventoReserva = (eventoReserva) => {
+  if (!eventoReserva) {
+    return {};
+  }
+
+  const eventoValidado = validarEventoReservaMovimiento(eventoReserva);
+
+  if (eventoValidado === "CONFIRMADA") {
+    return {
+      tipo: "RESERVA",
+      referencia_tipo: "RESERVA",
+    };
+  }
+
+  if (eventoValidado === "CANCELADA") {
+    return {
+      tipo: "RESERVA_CANCELADA",
+      referencia_tipo: "RESERVA",
+    };
+  }
+
+  return {
+    tipo: "RESERVA_VENCIDA",
+    referencia_tipo: "RESERVA",
+  };
+};
+
 // Construye filtros administrativos para consultar movimientos de stock.
 const construirFiltrosMovimientos = ({
   search,
   tipo,
   referenciaTipo,
+  eventoReserva,
   productoId,
   fechaDesde,
   fechaHasta,
@@ -178,6 +236,7 @@ const construirFiltrosMovimientos = ({
         }
       : {}),
   },
+  ...construirFiltroEventoReserva(eventoReserva),
 });
 
 /*
@@ -468,6 +527,7 @@ export const getMovimientosStock = async ({
   search,
   tipo,
   referenciaTipo,
+  eventoReserva,
   productoId,
   fechaDesde,
   fechaHasta,
@@ -478,6 +538,7 @@ export const getMovimientosStock = async ({
     search,
     tipo,
     referenciaTipo,
+    eventoReserva,
     productoId,
     fechaDesde,
     fechaHasta,
@@ -648,12 +709,36 @@ export const reservarStock = async (
 
 // Libera stock reservado por cancelación o vencimiento de reserva.
 // No modifica el stock total físico.
+//
+// El tipo de movimiento debe representar el evento funcional real
+// que originó la liberación del stock:
+// - RESERVA_CANCELADA;
+// - RESERVA_VENCIDA.
+//
+// La observación conserva el detalle descriptivo para trazabilidad,
+// mientras referenciaTipo continúa identificando al módulo RESERVA.
 export const liberarStockReservado = async (
-  { productoId, cantidad, referenciaTipo = "RESERVA", referenciaId = null },
+  {
+    productoId,
+    cantidad,
+    tipoMovimiento,
+    referenciaTipo = "RESERVA",
+    referenciaId = null,
+    observaciones = null,
+  },
   txExterna = null,
 ) => {
   const idProducto = validarIdProducto(productoId);
   const cantidadNumerica = validarCantidadPositiva(cantidad);
+
+  const tiposMovimientoValidos = ["RESERVA_CANCELADA", "RESERVA_VENCIDA"];
+
+  if (!tiposMovimientoValidos.includes(tipoMovimiento)) {
+    throw new AppError(
+      "El tipo de movimiento para liberar stock reservado es inválido",
+      400,
+    );
+  }
 
   const operacion = async (tx) => {
     const stockActual = await obtenerStockPorProducto(idProducto, tx);
@@ -671,10 +756,11 @@ export const liberarStockReservado = async (
     await registrarMovimientoStock(
       {
         productoId: idProducto,
-        tipo: "LIBERACION_RESERVA",
+        tipo: tipoMovimiento,
         cantidad: cantidadNumerica,
         referenciaTipo,
         referenciaId,
+        observaciones,
       },
       tx,
     );
@@ -695,12 +781,7 @@ export const liberarStockReservado = async (
 //
 // cantidad_disponible no se modifica para evitar un doble descuento.
 export const consumirStockReservado = async (
-  {
-    productoId,
-    cantidad,
-    referenciaTipo = "VENTA",
-    referenciaId = null,
-  },
+  { productoId, cantidad, referenciaTipo = "VENTA", referenciaId = null },
   txExterna = null,
 ) => {
   const idProducto = validarIdProducto(productoId);
@@ -715,8 +796,7 @@ export const consumirStockReservado = async (
       where: { producto_id: idProducto },
       data: {
         cantidad_total: stockActual.cantidad_total - cantidadNumerica,
-        cantidad_reservada:
-          stockActual.cantidad_reservada - cantidadNumerica,
+        cantidad_reservada: stockActual.cantidad_reservada - cantidadNumerica,
       },
     });
 
