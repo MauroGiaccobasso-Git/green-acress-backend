@@ -685,6 +685,58 @@ export const liberarStockReservado = async (
   return ejecutarOperacionStock(txExterna, operacion);
 };
 
+// Consume stock previamente reservado cuando una reserva confirmada
+// se retira presencialmente y se convierte en venta.
+//
+// La cantidad ya fue descontada del stock disponible al confirmar la reserva.
+// Por ese motivo, esta operación reduce únicamente:
+// - cantidad_total: porque el producto sale físicamente del inventario;
+// - cantidad_reservada: porque deja de estar bloqueado.
+//
+// cantidad_disponible no se modifica para evitar un doble descuento.
+export const consumirStockReservado = async (
+  {
+    productoId,
+    cantidad,
+    referenciaTipo = "VENTA",
+    referenciaId = null,
+  },
+  txExterna = null,
+) => {
+  const idProducto = validarIdProducto(productoId);
+  const cantidadNumerica = validarCantidadPositiva(cantidad);
+
+  const operacion = async (tx) => {
+    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+
+    validarStockReservado(stockActual, cantidadNumerica);
+
+    const stockActualizado = await tx.stock.update({
+      where: { producto_id: idProducto },
+      data: {
+        cantidad_total: stockActual.cantidad_total - cantidadNumerica,
+        cantidad_reservada:
+          stockActual.cantidad_reservada - cantidadNumerica,
+      },
+    });
+
+    await registrarMovimientoStock(
+      {
+        productoId: idProducto,
+        tipo: "EGRESO",
+        cantidad: cantidadNumerica,
+        referenciaTipo,
+        referenciaId,
+      },
+      tx,
+    );
+
+    return stockActualizado;
+  };
+
+  return ejecutarOperacionStock(txExterna, operacion);
+};
+
 // Ajusta manualmente el stock mediante una variación positiva o negativa.
 // Registra de forma atómica el stock, el movimiento de inventario y la auditoría.
 export const ajustarStock = async (

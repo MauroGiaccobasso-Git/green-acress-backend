@@ -1,5 +1,6 @@
 import {
   cancelarReserva,
+  confirmarRetiroReserva,
   getReservaPorId,
   getReservaPorIdUsuarioSocio,
   getReservas,
@@ -87,6 +88,23 @@ export const cancelarReservaAdmin = async (req, res) => {
   res.json({
     success: true,
     message: "Reserva cancelada correctamente",
+    data: reserva,
+  });
+};
+
+// Registra el retiro presencial de una reserva previamente confirmada.
+// La operación convierte automáticamente la reserva en una venta,
+// consume el stock reservado y finaliza el ciclo de vida de la reserva.
+export const confirmarRetiroReservaAdmin = async (req, res) => {
+  const reserva = await confirmarRetiroReserva({
+    reservaId: req.params.id,
+    usuarioId: req.usuario.id,
+  });
+
+  res.json({
+    success: true,
+    message:
+      "Retiro registrado correctamente. La reserva fue convertida en venta.",
     data: reserva,
   });
 };
