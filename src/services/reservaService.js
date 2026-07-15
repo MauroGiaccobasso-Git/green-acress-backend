@@ -505,22 +505,30 @@ const construirFiltrosReservas = ({
     const reservaIdSearch = searchNormalizado.replace(/\D/g, "");
     const reservaId = reservaIdSearch ? Number(reservaIdSearch) : null;
 
+    const terminosBusqueda = searchNormalizado.split(/\s+/).filter(Boolean);
+
     filtros.OR = [
       {
-        socio: {
-          nombre: {
-            contains: searchNormalizado,
-            mode: "insensitive",
-          },
-        },
-      },
-      {
-        socio: {
-          apellido: {
-            contains: searchNormalizado,
-            mode: "insensitive",
-          },
-        },
+        AND: terminosBusqueda.map((termino) => ({
+          OR: [
+            {
+              socio: {
+                nombre: {
+                  contains: termino,
+                  mode: "insensitive",
+                },
+              },
+            },
+            {
+              socio: {
+                apellido: {
+                  contains: termino,
+                  mode: "insensitive",
+                },
+              },
+            },
+          ],
+        })),
       },
       {
         socio: {
