@@ -1,32 +1,34 @@
 import "dotenv/config";
 
-// Librerías externas
-import express from "express";
 import cors from "cors";
+import express from "express";
 
-// Jobs
 import { iniciarReservationExpirationJob } from "./jobs/reservationExpirationJob.js";
-
-// Routes
-import homeRoutes from "./routes/homeRoutes.js";
-import usuarioRoutes from "./routes/usuarioRoutes.js";
-import authRoutes from "./routes/authRoutes.js";
-import socioRoutes from "./routes/socioRoutes.js";
-import productoRoutes from "./routes/productoRoutes.js";
-import proveedorRoutes from "./routes/proveedorRoutes.js";
-import compraRoutes from "./routes/compraRoutes.js";
-import ventaRoutes from "./routes/ventaRoutes.js";
-import stockRoutes from "./routes/stockRoutes.js";
-import reservaRoutes from "./routes/reservaRoutes.js";
-
-// Middlewares
 import { errorHandler } from "./middlewares/errorHandler.js";
 
+import authRoutes from "./routes/authRoutes.js";
+import compraRoutes from "./routes/compraRoutes.js";
+import homeRoutes from "./routes/homeRoutes.js";
+import productoRoutes from "./routes/productoRoutes.js";
+import proveedorRoutes from "./routes/proveedorRoutes.js";
+import reservaRoutes from "./routes/reservaRoutes.js";
+import socioRoutes from "./routes/socioRoutes.js";
+import stockRoutes from "./routes/stockRoutes.js";
+import usuarioRoutes from "./routes/usuarioRoutes.js";
+import ventaRoutes from "./routes/ventaRoutes.js";
+
+/* =========================================================
+   CONFIGURACIÓN GENERAL
+========================================================= */
+
 const app = express();
+const PORT = process.env.PORT || 8080;
 
-const PORT = 8080;
+/* =========================================================
+   MIDDLEWARES GLOBALES
+========================================================= */
 
-// Permite comunicación entre frontend y backend.
+// Permite la comunicación entre el frontend y el backend.
 app.use(
   cors({
     origin: "http://localhost:3000",
@@ -36,10 +38,13 @@ app.use(
 // Permite procesar cuerpos JSON enviados al backend.
 app.use(express.json());
 
-// Configuración de rutas principales del sistema.
+/* =========================================================
+   RUTAS DEL SISTEMA
+========================================================= */
+
 app.use("/", homeRoutes);
-app.use("/usuarios", usuarioRoutes);
 app.use("/auth", authRoutes);
+app.use("/usuarios", usuarioRoutes);
 app.use("/socios", socioRoutes);
 app.use("/productos", productoRoutes);
 app.use("/proveedores", proveedorRoutes);
@@ -48,13 +53,18 @@ app.use("/ventas", ventaRoutes);
 app.use("/stock", stockRoutes);
 app.use("/reservas", reservaRoutes);
 
-// Middleware global para manejo centralizado de errores.
+/* =========================================================
+   MANEJO GLOBAL DE ERRORES
+========================================================= */
+
 app.use(errorHandler);
 
-// Inicia servidor HTTP.
+/* =========================================================
+   INICIO DEL SERVIDOR
+========================================================= */
+
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 
-  // Inicializa los procesos automáticos del sistema.
   iniciarReservationExpirationJob();
 });

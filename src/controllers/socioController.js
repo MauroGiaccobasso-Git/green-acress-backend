@@ -1,33 +1,67 @@
-// Importa los servicios encargados de la lógica de negocio de socios.
-// El controller no accede directamente a la base de datos.
 import {
-  getSocios ,
-  crearSocio,
-  actualizarSocio,
-  obtenerPerfilSocio,
-  cambiarEstadoSocio,
   aceptarConsentimiento,
+  actualizarSocio,
+  cambiarEstadoSocio,
+  crearSocio,
+  getSocioPorId,
+  getSocios,
+  obtenerPerfilSocio,
 } from "../services/socioService.js";
-
-// Importa el wrapper reutilizable para capturar errores async
-// y derivarlos automáticamente al middleware global errorHandler.
 import { asyncHandler } from "../utils/asyncHandler.js";
 
-// Controller encargado de obtener la lista de socios registrados.
-// Obtiene socios registrados permitiendo aplicar búsqueda opcional para gestión administrativa.
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
+========================================================= */
+
+// Consulta socios con búsqueda, filtros y paginación.
 export const getSociosController = asyncHandler(async (req, res) => {
-  const { search } = req.query;
+  const {
+    search,
+    estado,
+    estadoUsuario,
+    page,
+    limit,
+  } = req.query;
 
-  const socios = await getSocios (search);
+  const resultado = await getSocios({
+    search,
+    estado,
+    estadoUsuario,
+    page,
+    limit,
+  });
 
-  return res.status(200).json(socios);
+  return res.status(200).json({
+    message: "Socios obtenidos correctamente",
+    socios: resultado.data,
+    pagination: resultado.pagination,
+  });
 });
 
-// Controller encargado de registrar un nuevo socio en el sistema.
-export const crearSocioController = asyncHandler(async (req, res) => {
-  const datosSocio = req.body;
+// Consulta el detalle administrativo de un socio.
+export const getSocioPorIdController = asyncHandler(async (req, res) => {
+  const { id } = req.params;
 
-  const nuevoSocio = await crearSocio(datosSocio);
+  const socio = await getSocioPorId(id);
+
+  return res.status(200).json({
+    message: "Socio obtenido correctamente",
+    socio,
+  });
+});
+
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
+
+// Registra un nuevo socio y su usuario asociado.
+export const crearSocioController = asyncHandler(async (req, res) => {
+  const usuarioId = req.usuario.id;
+
+  const nuevoSocio = await crearSocio({
+    usuarioId,
+    ...req.body,
+  });
 
   return res.status(201).json({
     message: "Socio creado correctamente",
@@ -35,12 +69,16 @@ export const crearSocioController = asyncHandler(async (req, res) => {
   });
 });
 
-// Controller encargado de modificar los datos de un socio existente.
+// Actualiza los datos personales y de acceso de un socio.
 export const actualizarSocioController = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const datosSocio = req.body;
+  const usuarioId = req.usuario.id;
 
-  const socioActualizado = await actualizarSocio(Number(id), datosSocio);
+  const socioActualizado = await actualizarSocio({
+    socioId: id,
+    usuarioId,
+    datosSocio: req.body,
+  });
 
   return res.status(200).json({
     message: "Socio actualizado correctamente",
@@ -48,42 +86,54 @@ export const actualizarSocioController = asyncHandler(async (req, res) => {
   });
 });
 
-// Controller encargado de devolver el perfil del socio autenticado.
-// El usuario_id se obtiene desde el token JWT cargado por verificarToken.
-export const obtenerPerfilSocioController = asyncHandler(async (req, res) => {
-  const usuarioId = req.usuario.id;
+// Cambia el estado funcional del socio y sincroniza su acceso.
+export const cambiarEstadoSocioController = asyncHandler(
+  async (req, res) => {
+    const { id } = req.params;
+    const { estado } = req.body;
+    const usuarioId = req.usuario.id;
 
-  const perfil = await obtenerPerfilSocio(usuarioId);
+    const socioActualizado = await cambiarEstadoSocio({
+      socioId: id,
+      usuarioId,
+      nuevoEstado: estado,
+    });
 
-  return res.status(200).json({
-    message: "Perfil del socio obtenido correctamente",
-    perfil,
-  });
-});
+    return res.status(200).json({
+      message: "Estado del socio actualizado correctamente",
+      socio: socioActualizado,
+    });
+  },
+);
 
-// Controller encargado de cambiar el estado de un socio.
-// Centraliza activación, desactivación y suspensión.
-export const cambiarEstadoSocioController = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { estado } = req.body;
+/* =========================================================
+   PERFIL Y CONSENTIMIENTO
+========================================================= */
 
-  const socioActualizado = await cambiarEstadoSocio(Number(id), estado);
+// Consulta el perfil del socio autenticado.
+export const obtenerPerfilSocioController = asyncHandler(
+  async (req, res) => {
+    const usuarioId = req.usuario.id;
 
-  return res.status(200).json({
-    message: "Estado del socio actualizado correctamente",
-    socio: socioActualizado,
-  });
-});
+    const perfil = await obtenerPerfilSocio(usuarioId);
 
-// Controller encargado de registrar la aceptación
-// del consentimiento informado del socio autenticado.
-export const aceptarConsentimientoSocio = asyncHandler(async (req, res) => {
-  const usuarioId = req.usuario.id;
+    return res.status(200).json({
+      message: "Perfil del socio obtenido correctamente",
+      perfil,
+    });
+  },
+);
 
-  const socioActualizado = await aceptarConsentimiento(usuarioId);
+// Registra la aceptación del consentimiento informado.
+export const aceptarConsentimientoSocio = asyncHandler(
+  async (req, res) => {
+    const usuarioId = req.usuario.id;
 
-  return res.status(200).json({
-    message: "Consentimiento aceptado correctamente",
-    socio: socioActualizado,
-  });
-});
+    const socioActualizado = await aceptarConsentimiento(usuarioId);
+
+    return res.status(200).json({
+      message: "Consentimiento aceptado correctamente",
+      socio: socioActualizado,
+    });
+  },
+);

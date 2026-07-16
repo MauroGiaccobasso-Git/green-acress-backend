@@ -1,50 +1,68 @@
-// Importa Express para crear las rutas del módulo
 import express from "express";
-
-// Importa los controladores del módulo de socios
 import {
-  getSociosController,
-  crearSocioController,
+  aceptarConsentimientoSocio,
   actualizarSocioController,
   cambiarEstadoSocioController,
+  crearSocioController,
+  getSocioPorIdController,
+  getSociosController,
   obtenerPerfilSocioController,
-  aceptarConsentimientoSocio,
 } from "../controllers/socioController.js";
-
-// Importa los middlewares de autenticación y autorización
 import {
-  verificarToken,
   autorizarRoles,
+  verificarConsentimientoSocio,
+  verificarToken,
 } from "../middlewares/authMiddleware.js";
 
-// Crea una instancia del router de Express
 const router = express.Router();
 
-// Ruta GET para consultar todos los socios registrados.
-// Solo puede acceder un ADMIN autenticado.
-router.get("/", verificarToken, autorizarRoles("ADMIN"), getSociosController);
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
+========================================================= */
 
-// Ruta POST para registrar un nuevo socio.
-// Solo puede acceder un ADMIN autenticado.
-router.post("/", verificarToken, autorizarRoles("ADMIN"), crearSocioController);
+// Consulta socios con búsqueda, filtros y paginación.
+router.get(
+  "/",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getSociosController,
+);
 
-// GET /socios/perfil
-//
-// Ruta protegida para que un socio autenticado
-// consulte únicamente su propio perfil.
-//
-// IMPORTANTE:
-// Esta ruta debe declararse antes de "/:id"
-// para evitar conflictos de routing en Express.
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
+
+// Registra un nuevo socio y su usuario asociado.
+router.post(
+  "/",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  crearSocioController,
+);
+
+/* =========================================================
+   PERFIL Y CONSENTIMIENTO
+========================================================= */
+
+/*
+  Las rutas estáticas deben declararse antes de "/:id"
+  para evitar que Express interprete sus nombres como identificadores.
+*/
+
+// Consulta el perfil del socio autenticado.
+// Solo está disponible cuando el consentimiento informado ya fue aceptado.
 router.get(
   "/perfil",
   verificarToken,
   autorizarRoles("SOCIO"),
+  verificarConsentimientoSocio,
   obtenerPerfilSocioController,
 );
 
-// Ruta para que un socio autenticado acepte su consentimiento informado.
-// Usa el usuario_id del token, por eso no recibe id por URL.
+// Registra la aceptación del consentimiento informado.
+// Debe permanecer accesible incluso si el socio todavía
+// no aceptó el consentimiento, ya que es el único endpoint
+// que le permite habilitar el acceso al Portal.
 router.patch(
   "/consentimiento",
   verificarToken,
@@ -52,8 +70,19 @@ router.patch(
   aceptarConsentimientoSocio,
 );
 
-// Ruta PUT para actualizar un socio existente.
-// Solo puede acceder un ADMIN autenticado.
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS POR SOCIO
+========================================================= */
+
+// Consulta el detalle administrativo de un socio.
+router.get(
+  "/:id",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getSocioPorIdController,
+);
+
+// Actualiza los datos de un socio existente.
 router.put(
   "/:id",
   verificarToken,
@@ -61,9 +90,7 @@ router.put(
   actualizarSocioController,
 );
 
-// Ruta PATCH para cambiar el estado de un socio.
-// Centraliza activación, desactivación y suspensión.
-// También sincroniza el estado del usuario asociado.
+// Cambia el estado del socio y sincroniza el acceso de su usuario.
 router.patch(
   "/:id/estado",
   verificarToken,
@@ -71,5 +98,4 @@ router.patch(
   cambiarEstadoSocioController,
 );
 
-// Exporta el router para utilizarlo en app.js
 export default router;
