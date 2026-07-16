@@ -71,6 +71,49 @@ export const verificarToken = async (req, res, next) => {
 };
 
 /*
+  Middleware de control de consentimiento informado.
+
+  Debe ejecutarse después de verificarToken y autorizarRoles("SOCIO"),
+  porque utiliza req.usuario para identificar al socio autenticado.
+
+  Bloquea el acceso a las funcionalidades privadas del Portal
+  mientras el socio no haya aceptado el consentimiento informado.
+*/
+export const verificarConsentimientoSocio = async (req, res, next) => {
+  try {
+    const socio = await prisma.socio.findUnique({
+      where: {
+        usuario_id: req.usuario.id,
+      },
+      select: {
+        id: true,
+        consentimiento_aceptado: true,
+      },
+    });
+
+    if (!socio) {
+      return res.status(403).json({
+        message: "No existe un socio asociado al usuario autenticado",
+      });
+    }
+
+    if (!socio.consentimiento_aceptado) {
+      return res.status(403).json({
+        message: "Debe aceptar el consentimiento informado para continuar",
+      });
+    }
+
+    req.socio = socio;
+
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      message: "No fue posible validar el consentimiento informado",
+    });
+  }
+};
+
+/*
   Middleware de autorización por roles.
 
   Debe ejecutarse después de verificarToken,

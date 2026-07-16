@@ -13,6 +13,7 @@ import {
 import {
   verificarToken,
   autorizarRoles,
+  verificarConsentimientoSocio,
 } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -30,27 +31,57 @@ const router = express.Router();
   del sistema (cron jobs), sin intervención manual de un administrador.
 */
 
-// Rutas del socio.
+/* =========================================================
+   RUTAS DEL SOCIO
+========================================================= */
+
+// Lista las reservas del socio autenticado.
+// Requiere que el consentimiento informado haya sido aceptado.
 router.get(
   "/mis-reservas",
   verificarToken,
   autorizarRoles("SOCIO"),
+  verificarConsentimientoSocio,
   listarMisReservas,
 );
 
+// Obtiene el detalle de una reserva del socio autenticado.
+// Requiere que el consentimiento informado haya sido aceptado.
 router.get(
   "/mis-reservas/:id",
   verificarToken,
   autorizarRoles("SOCIO"),
+  verificarConsentimientoSocio,
   obtenerMiReserva,
 );
 
-router.post("/", verificarToken, autorizarRoles("SOCIO"), crearReserva);
+// Solicita una nueva reserva.
+// Requiere que el consentimiento informado haya sido aceptado.
+router.post(
+  "/",
+  verificarToken,
+  autorizarRoles("SOCIO"),
+  verificarConsentimientoSocio,
+  crearReserva,
+);
 
-// Rutas administrativas.
-router.get("/", verificarToken, autorizarRoles("ADMIN"), listarReservas);
+/* =========================================================
+   RUTAS ADMINISTRATIVAS
+========================================================= */
 
-router.get("/:id", verificarToken, autorizarRoles("ADMIN"), obtenerReserva);
+router.get(
+  "/",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  listarReservas,
+);
+
+router.get(
+  "/:id",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  obtenerReserva,
+);
 
 router.patch(
   "/:id/cancelar",
