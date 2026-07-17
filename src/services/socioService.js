@@ -58,6 +58,14 @@ const socioSeguroSelect = {
   },
 };
 
+// Campos mínimos necesarios para identificar un socio en el selector de ventas.
+const socioVentaOptionSelect = {
+  id: true,
+  documento: true,
+  nombre: true,
+  apellido: true,
+};
+
 /* =========================================================
    VALIDACIONES GENERALES
 ========================================================= */
@@ -612,6 +620,22 @@ export const getSocios = async ({
     total,
     page: paginacion.page,
     limit: paginacion.limit,
+  });
+};
+
+// Obtiene socios habilitados para ser seleccionados al registrar una venta.
+export const getSociosOpcionesVenta = async () => {
+  return prisma.socio.findMany({
+    where: {
+      estado: "ACTIVO",
+      usuario: {
+        is: {
+          estado: "ACTIVO",
+        },
+      },
+    },
+    select: socioVentaOptionSelect,
+    orderBy: [{ apellido: "asc" }, { nombre: "asc" }, { id: "asc" }],
   });
 };
 
