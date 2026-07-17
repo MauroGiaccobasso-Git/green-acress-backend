@@ -6,6 +6,7 @@ import {
   crearSocioController,
   getSocioPorIdController,
   getSociosController,
+  getSociosOpcionesVentaController,
   obtenerPerfilSocioController,
 } from "../controllers/socioController.js";
 import {
@@ -26,6 +27,14 @@ router.get(
   verificarToken,
   autorizarRoles("ADMIN"),
   getSociosController,
+);
+
+// Consulta las opciones de socios habilitados para registrar ventas.
+router.get(
+  "/opciones-venta",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getSociosOpcionesVentaController,
 );
 
 /* =========================================================
