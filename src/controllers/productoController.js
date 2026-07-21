@@ -1,5 +1,7 @@
 import {
   getProductos,
+  getOpcionesProductosVenta,
+  getOpcionesProductosCompra,
   crearProducto,
   actualizarProducto,
   actualizarEstadoProducto,
@@ -31,6 +33,34 @@ export const getProductosController = asyncHandler(async (req, res) => {
 
   return res.status(200).json(resultado);
 });
+
+// Obtiene las opciones de productos disponibles para registrar ventas.
+export const getOpcionesProductosVentaController = asyncHandler(
+  async (req, res) => {
+    // Consulta únicamente flores activas, con precio válido y stock disponible.
+    const productos = await getOpcionesProductosVenta();
+
+    // Retorna las opciones operativas requeridas por el formulario de ventas.
+    return res.status(200).json({
+      message: "Opciones de productos para ventas obtenidas correctamente",
+      productos,
+    });
+  },
+);
+
+// Obtiene las opciones de productos disponibles para registrar compras.
+export const getOpcionesProductosCompraController = asyncHandler(
+  async (req, res) => {
+    // Consulta únicamente semillas activas requeridas por el formulario de compras.
+    const productos = await getOpcionesProductosCompra();
+
+    // Retorna las opciones operativas requeridas por el formulario de compras.
+    return res.status(200).json({
+      message: "Opciones de productos para compras obtenidas correctamente",
+      productos,
+    });
+  },
+);
 
 /**
  * Controller encargado de registrar un nuevo producto.

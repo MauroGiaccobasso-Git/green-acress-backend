@@ -311,8 +311,7 @@ const construirDatosCreacionProducto = (datosProducto) => {
     genetica,
     porcentaje_thc: tipo === "FLOR" ? Number(porcentaje_thc) : null,
     unidad_medida: unidadMedida,
-    precio_venta_actual:
-      tipo === "FLOR" ? Number(precio_venta_actual) : null,
+    precio_venta_actual: tipo === "FLOR" ? Number(precio_venta_actual) : null,
   };
 };
 
@@ -321,20 +320,12 @@ const construirDatosActualizacionProducto = (
   datosProducto,
   productoExistente,
 ) => {
-  const {
-    nombre,
-    descripcion,
-    imagen_url,
-    genetica,
-    precio_venta_actual,
-  } = datosProducto;
+  const { nombre, descripcion, imagen_url, genetica, precio_venta_actual } =
+    datosProducto;
 
   const tipoFinal = productoExistente.tipo;
 
-  const geneticaFinal = obtenerGeneticaFinal(
-    genetica,
-    productoExistente,
-  );
+  const geneticaFinal = obtenerGeneticaFinal(genetica, productoExistente);
 
   const porcentajeThcFinal = obtenerPorcentajeThcFinal(
     datosProducto,
@@ -531,6 +522,89 @@ export const getProductos = async ({
 };
 
 /* =========================================================
+   CONSULTAS OPERATIVAS
+========================================================= */
+
+// Obtiene las flores habilitadas para ser utilizadas en el registro de ventas.
+// La consulta aplica desde backend las reglas operativas de disponibilidad
+// y devuelve únicamente los datos requeridos por el selector.
+export const getOpcionesProductosVenta = async () => {
+  const productos = await prisma.producto.findMany({
+    where: {
+      tipo: "FLOR",
+      estado: "ACTIVO",
+      precio_venta_actual: {
+        gt: 0,
+      },
+      stock: {
+        is: {
+          cantidad_disponible: {
+            gt: 0,
+          },
+        },
+      },
+    },
+    select: {
+      id: true,
+      nombre: true,
+      porcentaje_thc: true,
+      precio_venta_actual: true,
+      stock: {
+        select: {
+          cantidad_disponible: true,
+        },
+      },
+    },
+    orderBy: {
+      nombre: "asc",
+    },
+  });
+
+  return productos.map((producto) => ({
+    id: producto.id,
+    nombre: producto.nombre,
+    porcentaje_thc: producto.porcentaje_thc,
+    precio: producto.precio_venta_actual,
+    stockDisponible: producto.stock.cantidad_disponible,
+  }));
+};
+
+// Obtiene las semillas habilitadas para ser utilizadas en el registro de compras.
+// La consulta conserva el comportamiento actual del selector administrativo,
+// mostrando únicamente semillas activas y un contrato reducido.
+export const getOpcionesProductosCompra = async () => {
+  const productos = await prisma.producto.findMany({
+    where: {
+      tipo: "SEMILLA",
+    },
+    select: {
+      id: true,
+      nombre: true,
+      estado: true,
+      genetica: true,
+      imagen_url: true,
+      stock: {
+        select: {
+          cantidad_disponible: true,
+        },
+      },
+    },
+    orderBy: {
+      nombre: "asc",
+    },
+  });
+
+  return productos.map((producto) => ({
+    id: producto.id,
+    nombre: producto.nombre,
+    estado: producto.estado,
+    genetica: producto.genetica,
+    imagen: producto.imagen_url,
+    stock: producto.stock.cantidad_disponible,
+  }));
+};
+
+/* =========================================================
    OPERACIONES DEL MÓDULO
 ========================================================= */
 
@@ -546,13 +620,9 @@ export const crearProducto = async ({ datosProducto, usuarioId }) => {
       tx,
     );
 
-    const datosCreacion =
-      construirDatosCreacionProducto(datosProducto);
+    const datosCreacion = construirDatosCreacionProducto(datosProducto);
 
-    const producto = await crearProductoPersistencia(
-      datosCreacion,
-      tx,
-    );
+    const producto = await crearProductoPersistencia(datosCreacion, tx);
 
     await auditarCreacionProducto(
       {
@@ -575,15 +645,9 @@ export const actualizarProducto = async ({
   const idUsuario = validarIdUsuario(usuarioId);
 
   return prisma.$transaction(async (tx) => {
-    const productoExistente = await obtenerProductoPorId(
-      idProducto,
-      tx,
-    );
+    const productoExistente = await obtenerProductoPorId(idProducto, tx);
 
-    validarTipoInmutable(
-      datosProducto.tipo,
-      productoExistente,
-    );
+    validarTipoInmutable(datosProducto.tipo, productoExistente);
 
     await validarNombreProducto(
       {
@@ -593,11 +657,10 @@ export const actualizarProducto = async ({
       tx,
     );
 
-    const datosActualizacion =
-      construirDatosActualizacionProducto(
-        datosProducto,
-        productoExistente,
-      );
+    const datosActualizacion = construirDatosActualizacionProducto(
+      datosProducto,
+      productoExistente,
+    );
 
     const producto = await actualizarProductoPersistencia(
       idProducto,
@@ -626,22 +689,15 @@ export const actualizarEstadoProducto = async ({
   const idUsuario = validarIdUsuario(usuarioId);
 
   return prisma.$transaction(async (tx) => {
-    const productoExistente = await obtenerProductoPorId(
+    const productoExistente = await obtenerProductoPorId(idProducto, tx);
+
+    validarCambioEstadoProducto(productoExistente, nuevoEstado);
+
+    const producto = await actualizarEstadoProductoPersistencia(
       idProducto,
+      nuevoEstado,
       tx,
     );
-
-    validarCambioEstadoProducto(
-      productoExistente,
-      nuevoEstado,
-    );
-
-    const producto =
-      await actualizarEstadoProductoPersistencia(
-        idProducto,
-        nuevoEstado,
-        tx,
-      );
 
     await auditarCambioEstadoProducto(
       {
