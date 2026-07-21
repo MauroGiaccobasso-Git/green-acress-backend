@@ -4,6 +4,8 @@ import express from "express";
 // Importa los controladores del módulo de productos
 import {
   getProductosController,
+  getOpcionesProductosVentaController,
+  getOpcionesProductosCompraController,
   crearProductoController,
   actualizarProductoController,
   actualizarEstadoProductoController,
@@ -25,6 +27,24 @@ router.get(
   verificarToken,
   autorizarRoles("ADMIN"),
   getProductosController,
+);
+
+// Ruta GET para obtener las opciones de productos disponibles para Ventas.
+// Devuelve únicamente flores activas, con precio válido y stock disponible.
+router.get(
+  "/opciones-venta",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getOpcionesProductosVentaController,
+);
+
+// Ruta GET para obtener las opciones de productos disponibles para Compras.
+// Devuelve únicamente semillas activas requeridas por el formulario de compra.
+router.get(
+  "/opciones-compra",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  getOpcionesProductosCompraController,
 );
 
 // Ruta protegida para registrar nuevos productos.
