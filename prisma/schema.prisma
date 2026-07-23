@@ -40,6 +40,7 @@ model Usuario {
   desafios_autenticacion   DesafioAutenticacion[]
   recuperaciones_password  RecuperacionPassword[]
   codigos_recuperacion_mfa CodigoRecuperacionMfa[]
+  novedades                Novedad[]
 
   @@index([estado])
   @@index([rol])
@@ -312,18 +313,57 @@ model Auditoria {
   @@index([entidad, entidad_id])
 }
 
+model Novedad {
+  id                  Int           @id @default(autoincrement())
+  titulo              String
+  contenido           String
+  estado              EstadoNovedad @default(ACTIVA)
+  usuario_id          Int
+  fecha_creacion      DateTime      @default(now())
+  fecha_actualizacion DateTime      @updatedAt
+
+  usuario        Usuario        @relation(fields: [usuario_id], references: [id])
+  notificaciones Notificacion[]
+
+  @@index([estado])
+  @@index([usuario_id])
+}
+
 model Notificacion {
   id             Int                @id @default(autoincrement())
-  socio_id       Int?
-  tipo           String
+  socio_id       Int
+  novedad_id     Int?
+  tipo           TipoNotificacion
   mensaje        String
-  canal          String
   estado         EstadoNotificacion @default(PENDIENTE)
   origen_id      Int?
-  fecha_envio    DateTime?
-  fecha_creacion DateTime           @default(now())
   origen_tipo    String?
-  socio          Socio?             @relation(fields: [socio_id], references: [id])
+  fecha_creacion DateTime           @default(now())
+
+  socio    Socio                 @relation(fields: [socio_id], references: [id])
+  novedad  Novedad?              @relation(fields: [novedad_id], references: [id])
+  entregas NotificacionEntrega[]
+
+  @@index([socio_id, estado])
+  @@index([novedad_id])
+  @@index([origen_tipo, origen_id])
+}
+
+model NotificacionEntrega {
+  id                   Int                       @id @default(autoincrement())
+  notificacion_id      Int
+  canal                CanalNotificacion
+  estado               EstadoEntregaNotificacion @default(PENDIENTE)
+  intentos             Int                       @default(0)
+  fecha_ultimo_intento DateTime?
+  fecha_envio          DateTime?
+  error_detalle        String?
+  fecha_creacion       DateTime                  @default(now())
+
+  notificacion Notificacion @relation(fields: [notificacion_id], references: [id])
+
+  @@index([notificacion_id])
+  @@index([estado])
 }
 
 /**
@@ -419,4 +459,33 @@ enum TipoMovimientoStock {
   RESERVA_CANCELADA
   RESERVA_VENCIDA
   AJUSTE
+}
+
+enum EstadoNovedad {
+  ACTIVA
+  INACTIVA
+}
+
+enum TipoNotificacion {
+  PASSWORD_TEMPORAL_GENERADA
+  PASSWORD_ACTUALIZADA
+  RECUPERACION_PASSWORD
+  MFA_ACTIVADO
+  RESERVA_CONFIRMADA
+  RESERVA_RECHAZADA
+  RESERVA_CANCELADA
+  RESERVA_VENCIDA
+  VENTA_ANULADA
+  NOVEDAD_PUBLICADA
+}
+
+enum CanalNotificacion {
+  EMAIL
+  TELEGRAM
+}
+
+enum EstadoEntregaNotificacion {
+  PENDIENTE
+  ENVIADA
+  ERROR
 }
