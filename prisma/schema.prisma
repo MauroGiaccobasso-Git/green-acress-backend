@@ -6,23 +6,91 @@ datasource db {
   provider = "postgresql"
 }
 
+/**
+ * =========================================================
+ * USUARIOS Y AUTENTICACIÓN
+ * =========================================================
+ */
+
 model Usuario {
-  id                  Int                @id @default(autoincrement())
-  email               String             @unique
-  password_hash       String
-  intentos_fallidos   Int                @default(0)
-  bloqueado_hasta     DateTime?
-  fecha_creacion      DateTime           @default(now())
-  fecha_actualizacion DateTime           @updatedAt
-  rol                 RolUsuario
-  estado              EstadoUsuario      @default(ACTIVO)
-  compras             Compra[]
-  auditorias          Auditoria[]
-  reservas            Reserva[]
-  historial_reservas  HistorialReserva[]
-  socio               Socio?
-  ventas              Venta[]
+  id                       Int                     @id @default(autoincrement())
+  email                    String                  @unique
+  password_hash            String
+  intentos_fallidos        Int                     @default(0)
+  bloqueado_hasta          DateTime?
+  ventana_intentos_desde   DateTime?
+  ultimo_intento_fallido   DateTime?
+  proximo_intento_desde    DateTime?
+  version_sesion           Int                     @default(0)
+  requiere_cambio_password Boolean                 @default(false)
+  password_temporal_expira DateTime?
+  mfa_habilitado           Boolean                 @default(false)
+  mfa_secreto_cifrado      String?
+  fecha_configuracion_mfa  DateTime?
+  fecha_creacion           DateTime                @default(now())
+  fecha_actualizacion      DateTime                @updatedAt
+  rol                      RolUsuario
+  estado                   EstadoUsuario           @default(ACTIVO)
+  compras                  Compra[]
+  auditorias               Auditoria[]
+  reservas                 Reserva[]
+  historial_reservas       HistorialReserva[]
+  socio                    Socio?
+  ventas                   Venta[]
+  desafios_autenticacion   DesafioAutenticacion[]
+  recuperaciones_password  RecuperacionPassword[]
+  codigos_recuperacion_mfa CodigoRecuperacionMfa[]
+
+  @@index([estado])
+  @@index([rol])
+  @@index([proximo_intento_desde])
 }
+
+model DesafioAutenticacion {
+  id             String                   @id @default(cuid())
+  usuario_id     Int
+  tipo           TipoDesafioAutenticacion
+  token_hash     String                   @unique
+  intentos       Int                      @default(0)
+  expira_en      DateTime
+  consumido_en   DateTime?
+  fecha_creacion DateTime                 @default(now())
+  usuario        Usuario                  @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id, tipo])
+  @@index([expira_en])
+}
+
+model RecuperacionPassword {
+  id             String    @id @default(cuid())
+  usuario_id     Int
+  token_hash     String    @unique
+  expira_en      DateTime
+  consumido_en   DateTime?
+  fecha_creacion DateTime  @default(now())
+  usuario        Usuario   @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id])
+  @@index([expira_en])
+}
+
+model CodigoRecuperacionMfa {
+  id             Int       @id @default(autoincrement())
+  usuario_id     Int
+  codigo_hash    String
+  usado_en       DateTime?
+  fecha_creacion DateTime  @default(now())
+  usuario        Usuario   @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@unique([usuario_id, codigo_hash])
+  @@index([usuario_id, usado_en])
+}
+
+/**
+ * =========================================================
+ * SOCIOS
+ * =========================================================
+ */
 
 model Socio {
   id                      Int            @id @default(autoincrement())
@@ -41,7 +109,16 @@ model Socio {
   reservas                Reserva[]
   usuario                 Usuario        @relation(fields: [usuario_id], references: [id])
   ventas                  Venta[]
+
+  @@index([estado])
+  @@index([nombre, apellido])
 }
+
+/**
+ * =========================================================
+ * PRODUCTOS Y STOCK
+ * =========================================================
+ */
 
 model Producto {
   id                  Int               @id @default(autoincrement())
@@ -83,7 +160,16 @@ model MovimientoStock {
   referencia_tipo String?
   observaciones   String?
   producto        Producto            @relation(fields: [producto_id], references: [id])
+
+  @@index([producto_id, fecha_creacion])
+  @@index([referencia_tipo, referencia_id])
 }
+
+/**
+ * =========================================================
+ * PROVEEDORES Y COMPRAS
+ * =========================================================
+ */
 
 model Proveedor {
   id                  Int             @id @default(autoincrement())
@@ -122,6 +208,12 @@ model CompraDetalle {
   producto        Producto @relation(fields: [producto_id], references: [id])
 }
 
+/**
+ * =========================================================
+ * VENTAS
+ * =========================================================
+ */
+
 model Venta {
   id                  Int            @id @default(autoincrement())
   socio_id            Int
@@ -149,6 +241,12 @@ model VentaDetalle {
   venta           Venta    @relation(fields: [venta_id], references: [id])
 }
 
+/**
+ * =========================================================
+ * RESERVAS
+ * =========================================================
+ */
+
 model Reserva {
   id                  Int                @id @default(autoincrement())
   socio_id            Int
@@ -165,6 +263,9 @@ model Reserva {
   usuario             Usuario            @relation(fields: [usuario_id], references: [id])
   venta               Venta?             @relation("ReservaVenta", fields: [venta_id], references: [id])
   detalles            ReservaDetalle[]
+
+  @@index([socio_id, estado])
+  @@index([estado, fecha_limite_retiro])
 }
 
 model ReservaDetalle {
@@ -187,7 +288,15 @@ model HistorialReserva {
   observaciones String?
   reserva       Reserva       @relation(fields: [reserva_id], references: [id])
   usuario       Usuario?      @relation(fields: [usuario_id], references: [id])
+
+  @@index([reserva_id, fecha])
 }
+
+/**
+ * =========================================================
+ * AUDITORÍA Y NOTIFICACIONES
+ * =========================================================
+ */
 
 model Auditoria {
   id             Int      @id @default(autoincrement())
@@ -198,6 +307,9 @@ model Auditoria {
   detalle        String?
   fecha_creacion DateTime @default(now())
   usuario        Usuario  @relation(fields: [usuario_id], references: [id])
+
+  @@index([usuario_id, fecha_creacion])
+  @@index([entidad, entidad_id])
 }
 
 model Notificacion {
@@ -213,6 +325,12 @@ model Notificacion {
   origen_tipo    String?
   socio          Socio?             @relation(fields: [socio_id], references: [id])
 }
+
+/**
+ * =========================================================
+ * ENUMS DE USUARIOS Y AUTENTICACIÓN
+ * =========================================================
+ */
 
 enum RolUsuario {
   ADMIN
@@ -230,6 +348,18 @@ enum EstadoSocio {
   INACTIVO
   SUSPENDIDO
 }
+
+enum TipoDesafioAutenticacion {
+  CAMBIO_PASSWORD_TEMPORAL
+  VERIFICACION_MFA
+  CONFIGURACION_MFA
+}
+
+/**
+ * =========================================================
+ * ENUMS OPERACIONALES
+ * =========================================================
+ */
 
 enum EstadoProducto {
   ACTIVO
