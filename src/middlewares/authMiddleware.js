@@ -1,37 +1,90 @@
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
+import { AppError } from "../utils/appError.js";
 
-/*
-  Middleware de autenticación con JWT.
+/* =========================================================
+   HELPERS DE AUTENTICACIÓN
+========================================================= */
 
-  Responsabilidades:
-  1. Verificar que la request tenga token.
-  2. Validar que el token sea válido.
-  3. Consultar la base de datos para confirmar que el usuario sigue existiendo.
-  4. Validar que el usuario siga ACTIVO.
-  5. Guardar los datos del usuario autenticado en req.usuario.
-*/
-export const verificarToken = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  // Si no se envía el header Authorization, se bloquea el acceso.
-  if (!authHeader) {
-    return res.status(401).json({
-      message: "Token no proporcionado",
-    });
+// Obtiene el token y valida el formato exacto:
+// Authorization: Bearer TOKEN
+const obtenerTokenBearer = (authHeader) => {
+  if (typeof authHeader !== "string") {
+    throw new AppError(
+      "No se proporcionó una sesión válida",
+      401,
+      "AUTH_TOKEN_REQUIRED",
+    );
   }
 
-  // El header llega con formato:
-  // Authorization: Bearer TOKEN
-  // Por eso se separa por espacio y se toma la segunda parte.
-  const token = authHeader.split(" ")[1];
+  const partes = authHeader.trim().split(/\s+/);
 
+  if (partes.length !== 2 || partes[0] !== "Bearer" || !partes[1]) {
+    throw new AppError(
+      "No se proporcionó una sesión válida",
+      401,
+      "AUTH_TOKEN_INVALID_FORMAT",
+    );
+  }
+
+  return partes[1];
+};
+
+// Verifica la firma, el vencimiento y la estructura mínima del token.
+const decodificarTokenSesion = (token) => {
   try {
-    // Verifica que el token sea válido y no esté expirado.
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Busca el usuario real en la base de datos.
-    // Esto permite detectar si fue desactivado después de haber iniciado sesión.
+    if (
+      typeof decoded !== "object" ||
+      decoded.type !== "SESSION" ||
+      !Number.isInteger(decoded.id) ||
+      !Number.isInteger(decoded.versionSesion)
+    ) {
+      throw new AppError(
+        "La sesión no es válida",
+        401,
+        "AUTH_SESSION_INVALID",
+      );
+    }
+
+    return decoded;
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    if (error.name === "TokenExpiredError") {
+      throw new AppError(
+        "La sesión expiró",
+        401,
+        "AUTH_SESSION_EXPIRED",
+      );
+    }
+
+    throw new AppError(
+      "La sesión no es válida",
+      401,
+      "AUTH_SESSION_INVALID",
+    );
+  }
+};
+
+/* =========================================================
+   MIDDLEWARE DE AUTENTICACIÓN
+========================================================= */
+
+/*
+  Valida la sesión JWT y consulta el usuario real en la base de datos.
+
+  La versión de sesión permite invalidar tokens anteriores cuando el usuario
+  cierra sesión, cambia su contraseña o se revoca su acceso.
+*/
+export const verificarToken = async (req, res, next) => {
+  try {
+    const token = obtenerTokenBearer(req.headers.authorization);
+    const decoded = decodificarTokenSesion(token);
+
     const usuario = await prisma.usuario.findUnique({
       where: {
         id: decoded.id,
@@ -41,43 +94,47 @@ export const verificarToken = async (req, res, next) => {
         email: true,
         rol: true,
         estado: true,
+        version_sesion: true,
       },
     });
 
-    // Si el usuario ya no existe, se rechaza el acceso.
-    if (!usuario) {
-      return res.status(401).json({
-        message: "Usuario no encontrado",
-      });
+    if (!usuario || usuario.estado !== "ACTIVO") {
+      throw new AppError(
+        "La sesión no es válida",
+        401,
+        "AUTH_SESSION_INVALID",
+      );
     }
 
-    // Si el usuario fue desactivado, no puede seguir usando rutas protegidas.
-    if (usuario.estado !== "ACTIVO") {
-      return res.status(403).json({
-        message: "Usuario inactivo",
-      });
+    // Si la versión guardada cambió, el token pertenece a una sesión revocada.
+    if (usuario.version_sesion !== decoded.versionSesion) {
+      throw new AppError(
+        "La sesión fue cerrada o revocada",
+        401,
+        "AUTH_SESSION_REVOKED",
+      );
     }
 
-    // Guarda los datos actualizados del usuario en la request.
-    // Las siguientes capas podrán usar req.usuario.
-    req.usuario = usuario;
+    req.usuario = {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      estado: usuario.estado,
+    };
 
     next();
   } catch (error) {
-    return res.status(401).json({
-      message: "Token inválido o expirado",
-    });
+    next(error);
   }
 };
 
+/* =========================================================
+   MIDDLEWARE DE CONSENTIMIENTO
+========================================================= */
+
 /*
-  Middleware de control de consentimiento informado.
-
-  Debe ejecutarse después de verificarToken y autorizarRoles("SOCIO"),
-  porque utiliza req.usuario para identificar al socio autenticado.
-
-  Bloquea el acceso a las funcionalidades privadas del Portal
-  mientras el socio no haya aceptado el consentimiento informado.
+  Bloquea las funcionalidades privadas del Portal de Socios hasta que
+  el consentimiento informado haya sido aceptado.
 */
 export const verificarConsentimientoSocio = async (req, res, next) => {
   try {
@@ -92,50 +149,59 @@ export const verificarConsentimientoSocio = async (req, res, next) => {
     });
 
     if (!socio) {
-      return res.status(403).json({
-        message: "No existe un socio asociado al usuario autenticado",
-      });
+      throw new AppError(
+        "No existe un socio asociado al usuario autenticado",
+        403,
+        "SOCIO_NOT_ASSOCIATED",
+      );
     }
 
     if (!socio.consentimiento_aceptado) {
-      return res.status(403).json({
-        message: "Debe aceptar el consentimiento informado para continuar",
-      });
+      throw new AppError(
+        "Debe aceptar el consentimiento informado para continuar",
+        403,
+        "SOCIO_CONSENT_REQUIRED",
+      );
     }
 
     req.socio = socio;
 
     next();
   } catch (error) {
-    return res.status(500).json({
-      message: "No fue posible validar el consentimiento informado",
-    });
+    next(error);
   }
 };
 
-/*
-  Middleware de autorización por roles.
+/* =========================================================
+   MIDDLEWARE DE AUTORIZACIÓN
+========================================================= */
 
-  Debe ejecutarse después de verificarToken,
-  porque utiliza req.usuario para saber qué rol tiene el usuario autenticado.
+/*
+  Permite continuar únicamente a los roles indicados en la ruta.
+  Debe ejecutarse después de verificarToken.
 */
 export const autorizarRoles = (...rolesPermitidos) => {
   return (req, res, next) => {
-    // Si no existe req.usuario, significa que no pasó correctamente por verificarToken.
     if (!req.usuario) {
-      return res.status(401).json({
-        message: "Usuario no autenticado",
-      });
+      return next(
+        new AppError(
+          "Usuario no autenticado",
+          401,
+          "AUTH_USER_NOT_AUTHENTICATED",
+        ),
+      );
     }
 
-    // Valida que el rol del usuario esté dentro de los roles permitidos.
     if (!rolesPermitidos.includes(req.usuario.rol)) {
-      return res.status(403).json({
-        message: "No tiene permisos para acceder a este recurso",
-      });
+      return next(
+        new AppError(
+          "No tiene permisos para acceder a este recurso",
+          403,
+          "AUTH_FORBIDDEN",
+        ),
+      );
     }
 
-    // Si el rol está permitido, continúa hacia el controller.
     next();
   };
 };

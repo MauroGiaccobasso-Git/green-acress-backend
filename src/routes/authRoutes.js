@@ -1,29 +1,52 @@
 import express from "express";
-import { login } from "../controllers/authController.js";
-import { verificarToken, autorizarRoles } from "../middlewares/authMiddleware.js";
+import {
+  login,
+  logout,
+  cambiarPassword,
+} from "../controllers/authController.js";
+import {
+  verificarToken,
+  autorizarRoles,
+} from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
+/* =========================================================
+   AUTENTICACIÓN
+========================================================= */
+
 router.post("/login", login);
 
-// Ruta protegida de prueba
-// Esta ruta utiliza el middleware verificarToken para validar que el usuario esté autenticado
-router.get("/perfil", verificarToken, (req, res) => {
-  // Si el token es válido, el middleware ya permitió el acceso
-  // y agregó la información del usuario en req.usuario
+/*
+  Permite cambiar la contraseña temporal por una definitiva.
 
+  No requiere token porque el usuario todavía no tiene
+  acceso completo al sistema hasta finalizar este proceso.
+*/
+router.post("/cambiar-password", cambiarPassword);
+
+/*
+  Cierra la sesión actual.
+
+  Necesita un token válido porque utiliza req.usuario.id
+  para incrementar la versión de sesión en la base de datos.
+*/
+router.post("/logout", verificarToken, logout);
+
+
+/* =========================================================
+   RUTAS DE PRUEBA
+========================================================= */
+
+// Ruta protegida de prueba.
+router.get("/perfil", verificarToken, (req, res) => {
   res.json({
     message: "Acceso autorizado",
-
-    // Se devuelve la información del usuario obtenida desde el token
-    // (no desde la base de datos, sino desde lo que se guardó en el JWT)
     usuario: req.usuario,
   });
 });
 
-// Ruta protegida de prueba solo para administradores
-// Primero valida que exista un token JWT válido
-// Luego valida que el usuario autenticado tenga rol ADMIN
+// Ruta protegida de prueba solo para administradores.
 router.get("/admin", verificarToken, autorizarRoles("ADMIN"), (req, res) => {
   res.json({
     message: "Acceso autorizado para administrador",

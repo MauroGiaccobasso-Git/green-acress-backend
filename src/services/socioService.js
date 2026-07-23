@@ -173,17 +173,34 @@ const normalizarDatoNumerico = (valor) => {
   return String(valor ?? "").trim();
 };
 
+// Genera una contraseña temporal segura para nuevos socios.
+// La contraseña en texto plano solo existe durante el flujo de alta
+// para poder enviarla posteriormente mediante el servicio de email.
+// En base de datos siempre se almacena únicamente su hash.
+const generarPasswordTemporal = () => {
+  const caracteres =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%";
+
+  let password = "";
+
+  for (let i = 0; i < 12; i++) {
+    password += caracteres.charAt(
+      Math.floor(Math.random() * caracteres.length),
+    );
+  }
+
+  return password;
+};
+
 // Normaliza los datos obligatorios utilizados al crear un socio.
 const normalizarDatosCreacionSocio = ({
   email,
-  password,
   documento,
   nombre,
   apellido,
   telefono,
 }) => ({
   email: normalizarEmail(email),
-  password: String(password ?? ""),
   documento: normalizarDatoNumerico(documento),
   nombre: normalizarTexto(nombre),
   apellido: normalizarTexto(apellido),
@@ -291,13 +308,12 @@ const validarEmailDuplicadoUsuario = async (
 // Valida todos los datos requeridos para registrar un socio.
 const validarDatosCreacionSocio = ({
   email,
-  password,
   documento,
   nombre,
   apellido,
   telefono,
 }) => {
-  if (!email || !password || !documento || !nombre || !apellido || !telefono) {
+  if (!email || !documento || !nombre || !apellido || !telefono) {
     throw new AppError(
       "Todos los campos obligatorios deben estar completos",
       400,
@@ -306,10 +322,6 @@ const validarDatosCreacionSocio = ({
 
   if (!validarEmail(email)) {
     throw new AppError("El formato del email no es válido", 400);
-  }
-
-  if (!validarPassword(password)) {
-    throw new AppError("La contraseña debe tener al menos 8 caracteres", 400);
   }
 
   if (!validarDocumento(documento)) {
@@ -654,7 +666,6 @@ export const getSocioPorId = async (id) => {
 export const crearSocio = async ({
   usuarioId,
   email,
-  password,
   documento,
   nombre,
   apellido,
@@ -664,7 +675,6 @@ export const crearSocio = async ({
 
   const datosNormalizados = normalizarDatosCreacionSocio({
     email,
-    password,
     documento,
     nombre,
     apellido,
@@ -673,7 +683,11 @@ export const crearSocio = async ({
 
   validarDatosCreacionSocio(datosNormalizados);
 
-  const passwordHash = await bcrypt.hash(datosNormalizados.password, 10);
+  // La contraseña temporal es generada automáticamente por el backend.
+  // Posteriormente será enviada mediante el servicio centralizado de email.
+  const passwordTemporal = generarPasswordTemporal();
+
+  const passwordHash = await bcrypt.hash(passwordTemporal, 10);
 
   return prisma.$transaction(async (tx) => {
     await validarDocumentoDuplicadoSocio(datosNormalizados.documento, null, tx);
@@ -685,6 +699,8 @@ export const crearSocio = async ({
         email: datosNormalizados.email,
         password_hash: passwordHash,
         rol: "SOCIO",
+        requiere_cambio_password: true,
+        password_temporal_expira: new Date(Date.now() + 72 * 60 * 60 * 1000),
       },
       select: usuarioSeguroSelect,
     });
