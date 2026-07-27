@@ -96,13 +96,14 @@ export const actualizarSocioController = asyncHandler(async (req, res) => {
 // Cambia el estado funcional del socio y sincroniza su acceso.
 export const cambiarEstadoSocioController = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { estado } = req.body;
+  const { estado, motivo } = req.body;
   const usuarioId = req.usuario.id;
 
   const socioActualizado = await cambiarEstadoSocio({
     socioId: id,
     usuarioId,
     nuevoEstado: estado,
+    motivo,
   });
 
   return res.status(200).json({

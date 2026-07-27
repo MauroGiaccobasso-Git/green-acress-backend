@@ -832,6 +832,60 @@ const consumirStockReservaRetirada = async (detallesReserva, ventaId, tx) => {
   }
 };
 
+/*
+  Cancela una reserva activa reutilizando la misma operación de dominio
+  tanto para la cancelación administrativa individual como para procesos
+  internos que deban resolver reservas de un socio.
+
+  Las reservas CONFIRMADAS liberan el stock previamente comprometido.
+  Las reservas PENDIENTES no poseen stock bloqueado, por lo que únicamente
+  se actualizan junto con su historial y auditoría.
+*/
+const cancelarReservaInterna = async (
+  { reserva, usuarioId, observaciones, detalleAuditoria },
+  tx,
+) => {
+  if (reserva.estado === "CONFIRMADA") {
+    await liberarStockReserva(
+      reserva.detalles,
+      reserva.id,
+      "RESERVA_CANCELADA",
+      "Stock liberado por cancelación de reserva.",
+      tx,
+    );
+  }
+
+  await actualizarEstadoReserva(
+    {
+      reservaId: reserva.id,
+      estado: "CANCELADA",
+      fechaLimiteRetiro: null,
+    },
+    tx,
+  );
+
+  await registrarHistorialReserva(
+    {
+      reservaId: reserva.id,
+      usuarioId,
+      estado: "CANCELADA",
+      observaciones,
+    },
+    tx,
+  );
+
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CANCELAR_RESERVA",
+      entidad: "Reserva",
+      entidadId: reserva.id,
+      detalle: detalleAuditoria,
+    },
+    tx,
+  );
+};
+
 const confirmarReserva = async ({ reservaId, detallesCalculados }, tx) => {
   const fechaLimiteRetiro = calcularFechaLimiteRetiro();
 
@@ -1150,6 +1204,79 @@ export const confirmarRetiroReserva = async ({
   });
 };
 
+/*
+  Cancela todas las reservas activas de un socio dentro de una única operación.
+
+  Esta capacidad es utilizada por otros módulos cuando una regla de negocio
+  exige resolver las reservas PENDIENTES o CONFIRMADAS del socio, sin duplicar
+  la lógica propietaria del dominio Reservas.
+
+  Si se recibe una transacción externa, la operación se integra a ella para
+  conservar la atomicidad del proceso que originó la cancelación.
+*/
+export const cancelarReservasActivasPorSocio = async (
+  { socioId, usuarioId, motivo },
+  txExterna = null,
+) => {
+  const idSocio = validarIdSocio(socioId);
+  const idUsuario = validarIdUsuario(usuarioId);
+  const motivoNormalizado = String(motivo ?? "").trim();
+
+  if (!motivoNormalizado) {
+    throw new AppError(
+      "El motivo de cancelación de las reservas es obligatorio",
+      400,
+    );
+  }
+
+  const operacion = async (tx) => {
+    const reservasActivas = await tx.reserva.findMany({
+      where: {
+        socio_id: idSocio,
+        estado: {
+          in: ["PENDIENTE", "CONFIRMADA"],
+        },
+      },
+      include: {
+        detalles: true,
+      },
+      orderBy: {
+        fecha_solicitud: "asc",
+      },
+    });
+
+    for (const reserva of reservasActivas) {
+      const liberaStock = reserva.estado === "CONFIRMADA";
+
+      await cancelarReservaInterna(
+        {
+          reserva,
+          usuarioId: idUsuario,
+          observaciones:
+            `Reserva cancelada automáticamente por cambio de estado del socio. ` +
+            `Motivo: ${motivoNormalizado}.`,
+          detalleAuditoria:
+            `Reserva cancelada por cambio de estado del socio. ` +
+            `${liberaStock ? "Se liberó el stock reservado. " : ""}` +
+            `Motivo: ${motivoNormalizado}.`,
+        },
+        tx,
+      );
+    }
+
+    return {
+      cantidadCancelada: reservasActivas.length,
+      reservasIds: reservasActivas.map((reserva) => reserva.id),
+    };
+  };
+
+  if (txExterna) {
+    return operacion(txExterna);
+  }
+
+  return prisma.$transaction(operacion);
+};
+
 export const cancelarReserva = async ({
   reservaId,
   usuarioId,
@@ -1163,45 +1290,13 @@ export const cancelarReserva = async ({
 
     validarReservaCancelable(reserva);
 
-    if (reserva.estado === "CONFIRMADA") {
-      await liberarStockReserva(
-        reserva.detalles,
-        idReserva,
-        "RESERVA_CANCELADA",
-        "Stock liberado por cancelación de reserva.",
-        tx,
-      );
-    }
-
-    await actualizarEstadoReserva(
+    await cancelarReservaInterna(
       {
-        reservaId: idReserva,
-        estado: "CANCELADA",
-        fechaLimiteRetiro: null,
-      },
-      tx,
-    );
-
-    await registrarHistorialReserva(
-      {
-        reservaId: idReserva,
+        reserva,
         usuarioId: idUsuario,
-        estado: "CANCELADA",
         observaciones: observaciones || "Reserva cancelada manualmente.",
-      },
-      tx,
-    );
-
-    await registrarAuditoria(
-      {
-        usuarioId: idUsuario,
-        accion: "CANCELAR_RESERVA",
-        entidad: "Reserva",
-        entidadId: idReserva,
-        detalle:
-          reserva.estado === "CONFIRMADA"
-            ? "Reserva cancelada manualmente. Se liberó el stock reservado."
-            : "Reserva cancelada manualmente.",
+        detalleAuditoria:
+          "Reserva cancelada manualmente. Se liberó el stock reservado.",
       },
       tx,
     );

@@ -16,6 +16,7 @@ import socioRoutes from "./routes/socioRoutes.js";
 import stockRoutes from "./routes/stockRoutes.js";
 import usuarioRoutes from "./routes/usuarioRoutes.js";
 import ventaRoutes from "./routes/ventaRoutes.js";
+import novedadRoutes from "./routes/novedadRoutes.js";
 
 /* =========================================================
    CONFIGURACIÓN GENERAL
@@ -23,6 +24,7 @@ import ventaRoutes from "./routes/ventaRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
 
 /* =========================================================
    MIDDLEWARES GLOBALES
@@ -38,6 +40,7 @@ app.use(
 // Permite procesar cuerpos JSON enviados al backend.
 app.use(express.json());
 
+
 /* =========================================================
    RUTAS DEL SISTEMA
 ========================================================= */
@@ -52,12 +55,15 @@ app.use("/compras", compraRoutes);
 app.use("/ventas", ventaRoutes);
 app.use("/stock", stockRoutes);
 app.use("/reservas", reservaRoutes);
+app.use("/novedades", novedadRoutes);
+
 
 /* =========================================================
    MANEJO GLOBAL DE ERRORES
 ========================================================= */
 
 app.use(errorHandler);
+
 
 /* =========================================================
    INICIO DEL SERVIDOR
