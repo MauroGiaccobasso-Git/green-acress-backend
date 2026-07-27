@@ -14,6 +14,7 @@ import {
   verificarToken,
   autorizarRoles,
   verificarConsentimientoSocio,
+  requerirSocioActivo,
 } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
@@ -56,12 +57,14 @@ router.get(
 );
 
 // Solicita una nueva reserva.
-// Requiere que el consentimiento informado haya sido aceptado.
+// Requiere que el consentimiento informado haya sido aceptado
+// y que el socio se encuentre en estado ACTIVO.
 router.post(
   "/",
   verificarToken,
   autorizarRoles("SOCIO"),
   verificarConsentimientoSocio,
+  requerirSocioActivo,
   crearReserva,
 );
 

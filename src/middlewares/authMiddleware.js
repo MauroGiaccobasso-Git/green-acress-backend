@@ -78,7 +78,7 @@ const decodificarTokenSesion = (token) => {
   Valida la sesión JWT y consulta el usuario real en la base de datos.
 
   La versión de sesión permite invalidar tokens anteriores cuando el usuario
-  cierra sesión, cambia su contraseña o se revoca su acceso.
+  cambia su contraseña o se revoca su acceso.
 */
 export const verificarToken = async (req, res, next) => {
   try {
@@ -144,6 +144,7 @@ export const verificarConsentimientoSocio = async (req, res, next) => {
       },
       select: {
         id: true,
+        estado: true,
         consentimiento_aceptado: true,
       },
     });
@@ -161,6 +162,56 @@ export const verificarConsentimientoSocio = async (req, res, next) => {
         "Debe aceptar el consentimiento informado para continuar",
         403,
         "SOCIO_CONSENT_REQUIRED",
+      );
+    }
+
+    req.socio = socio;
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/* =========================================================
+   MIDDLEWARE DE ESTADO DEL SOCIO
+========================================================= */
+
+/*
+  Permite realizar operaciones únicamente a socios en estado ACTIVO.
+
+  Los socios INACTIVOS pueden acceder al portal y consultar información,
+  pero no pueden generar nuevas operaciones.
+*/
+export const requerirSocioActivo = async (req, res, next) => {
+  try {
+    let socio = req.socio;
+
+    if (!socio) {
+      socio = await prisma.socio.findUnique({
+        where: {
+          usuario_id: req.usuario.id,
+        },
+        select: {
+          id: true,
+          estado: true,
+        },
+      });
+    }
+
+    if (!socio) {
+      throw new AppError(
+        "No existe un socio asociado al usuario autenticado",
+        403,
+        "SOCIO_NOT_ASSOCIATED",
+      );
+    }
+
+    if (socio.estado !== "ACTIVO") {
+      throw new AppError(
+        "El socio no se encuentra habilitado para realizar esta operación",
+        403,
+        "SOCIO_NOT_ACTIVE",
       );
     }
 
