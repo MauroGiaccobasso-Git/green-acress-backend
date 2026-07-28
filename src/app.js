@@ -7,6 +7,7 @@ import { iniciarReservationExpirationJob } from "./jobs/reservationExpirationJob
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 import authRoutes from "./routes/authRoutes.js";
+import mfaRoutes from "./routes/mfaRoutes.js";
 import compraRoutes from "./routes/compraRoutes.js";
 import homeRoutes from "./routes/homeRoutes.js";
 import productoRoutes from "./routes/productoRoutes.js";
@@ -47,6 +48,8 @@ app.use(express.json());
 
 app.use("/", homeRoutes);
 app.use("/auth", authRoutes);
+app.use("/auth/mfa", mfaRoutes);
+
 app.use("/usuarios", usuarioRoutes);
 app.use("/socios", socioRoutes);
 app.use("/productos", productoRoutes);

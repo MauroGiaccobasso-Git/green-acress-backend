@@ -1,7 +1,15 @@
 import prisma from "../config/prisma.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { createHash, randomBytes } from "node:crypto";
 import { AppError } from "../utils/appError.js";
+import { descifrar } from "../utils/encryption.js";
+import { enviarRecuperacionPassword } from "./email/emailService.js";
+import { registrarAuditoriaSistema } from "./auditoriaService.js";
+import {
+  validarCodigoMfa,
+  validarCodigoRecuperacionMfa,
+} from "./mfaService.js";
 
 /* =========================================================
    CONSTANTES
@@ -10,6 +18,10 @@ import { AppError } from "../utils/appError.js";
 // Mensaje público único para evitar revelar si un email existe,
 // si la contraseña es incorrecta o si la cuenta no puede ingresar.
 const MENSAJE_CREDENCIALES_INVALIDAS = "Email o contraseña incorrectos";
+
+// Respuesta pública única para no revelar si un email está registrado.
+const MENSAJE_RECUPERACION_SOLICITADA =
+  "Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña";
 
 // Cantidad máxima utilizada para calcular el retraso progresivo.
 // No bloquea la cuenta.
@@ -26,6 +38,9 @@ const RETARDOS_LOGIN = {
   4: 10000,
   5: 30000,
 };
+
+// Tiempo de vigencia de un enlace de recuperación.
+const RECUPERACION_PASSWORD_EXPIRA_MS = 30 * 60 * 1000;
 
 /* =========================================================
    HELPERS
@@ -48,6 +63,13 @@ const validarCredenciales = (email, password) => {
       400,
       "AUTH_CREDENTIALS_REQUIRED",
     );
+  }
+};
+
+// Valida que el email requerido para recuperación haya sido enviado.
+const validarEmailRecuperacion = (email) => {
+  if (!email) {
+    throw new AppError("El email es obligatorio", 400, "AUTH_EMAIL_REQUIRED");
   }
 };
 
@@ -96,6 +118,28 @@ const lanzarErrorCredencialesInvalidas = () => {
     401,
     "AUTH_INVALID_CREDENTIALS",
   );
+};
+
+// Genera un token criptográficamente seguro para recuperación.
+const generarTokenRecuperacion = () => randomBytes(32).toString("hex");
+
+// Genera un hash irreversible del token recibido por email.
+const hashearTokenRecuperacion = (token) =>
+  createHash("sha256").update(token).digest("hex");
+
+// Construye la URL que recibirá el socio por correo.
+const construirRecoveryUrl = (token) => {
+  const frontendUrl = process.env.FRONTEND_URL;
+
+  if (!frontendUrl) {
+    throw new AppError(
+      "La URL del frontend no se encuentra configurada",
+      500,
+      "AUTH_FRONTEND_URL_NOT_CONFIGURED",
+    );
+  }
+
+  return `${frontendUrl.replace(/\/$/, "")}/restablecer-password?token=${encodeURIComponent(token)}`;
 };
 
 /*
@@ -151,10 +195,7 @@ const obtenerProximoIntentoPermitido = (usuario) => {
   - próximo momento permitido.
 */
 const registrarIntentoFallido = async (usuarioId, intentosActuales) => {
-  const nuevosIntentos = Math.min(
-    intentosActuales + 1,
-    MAX_INTENTOS_FALLIDOS,
-  );
+  const nuevosIntentos = Math.min(intentosActuales + 1, MAX_INTENTOS_FALLIDOS);
 
   const retraso = RETARDOS_LOGIN[nuevosIntentos] ?? 30000;
 
@@ -165,9 +206,7 @@ const registrarIntentoFallido = async (usuarioId, intentosActuales) => {
     data: {
       intentos_fallidos: nuevosIntentos,
       ultimo_intento_fallido: new Date(),
-      proximo_intento_desde: new Date(
-        Date.now() + retraso,
-      ),
+      proximo_intento_desde: new Date(Date.now() + retraso),
     },
   });
 };
@@ -213,7 +252,6 @@ export const loginUsuario = async (email, password) => {
     lanzarErrorCredencialesInvalidas();
   }
 
-  // Verifica si existe una espera activa por intentos fallidos.
   const proximoIntento = obtenerProximoIntentoPermitido(usuario);
 
   if (proximoIntento) {
@@ -224,32 +262,18 @@ export const loginUsuario = async (email, password) => {
     );
   }
 
-  const passwordValida = await bcrypt.compare(
-    password,
-    usuario.password_hash,
-  );
+  const passwordValida = await bcrypt.compare(password, usuario.password_hash);
 
   if (!passwordValida || usuario.estado !== "ACTIVO") {
-    await registrarIntentoFallido(
-      usuario.id,
-      usuario.intentos_fallidos,
-    );
+    await registrarIntentoFallido(usuario.id, usuario.intentos_fallidos);
 
     lanzarErrorCredencialesInvalidas();
   }
 
-  // Si la autenticación fue correcta,
-  // limpiamos intentos fallidos anteriores.
   await limpiarIntentosFallidos(usuario.id);
 
-  // Valida si la contraseña temporal sigue vigente.
   validarPasswordTemporalVigente(usuario);
 
-  /*
-    Si el usuario ingresó utilizando una contraseña temporal,
-    debe establecer una contraseña definitiva antes
-    de acceder al sistema.
-  */
   if (usuario.requiere_cambio_password) {
     throw new AppError(
       "Debe cambiar su contraseña antes de continuar",
@@ -259,8 +283,32 @@ export const loginUsuario = async (email, password) => {
   }
 
   const requiereConsentimiento =
-    usuario.rol === "SOCIO" &&
-    usuario.socio?.consentimiento_aceptado === false;
+    usuario.rol === "SOCIO" && usuario.socio?.consentimiento_aceptado === false;
+
+  /* =========================================================
+     VALIDACIÓN MFA ADMIN
+  ========================================================= */
+
+  /*
+    Si el usuario es administrador y tiene MFA habilitado,
+    no se entrega todavía el JWT definitivo.
+
+    Primero debe completar el segundo factor
+    mediante un código TOTP generado por su aplicación
+    autenticadora.
+  */
+  if (usuario.rol === "ADMIN" && usuario.mfa_habilitado) {
+    return {
+      message: "Código MFA requerido",
+      requiereMfa: true,
+      usuario: {
+        id: usuario.id,
+        email: usuario.email,
+        rol: usuario.rol,
+        estado: usuario.estado,
+      },
+    };
+  }
 
   const token = generarTokenSesion(usuario);
 
@@ -278,16 +326,170 @@ export const loginUsuario = async (email, password) => {
 };
 
 /* =========================================================
+   VERIFICACIÓN MFA LOGIN
+========================================================= */
+
+/**
+ * Completa el segundo factor de autenticación
+ * para administradores con MFA habilitado.
+ *
+ * Flujo:
+ *
+ * Email + contraseña
+ *        ↓
+ * MFA requerido
+ *        ↓
+ * Código TOTP
+ *        ↓
+ * Validación del secreto MFA
+ *        ↓
+ * Generación JWT definitivo
+ */
+export const verificarMfaLoginUsuario = async (usuarioId, codigo) => {
+  const usuario = await prisma.usuario.findUnique({
+    where: {
+      id: usuarioId,
+    },
+    select: {
+      id: true,
+      email: true,
+      rol: true,
+      estado: true,
+      version_sesion: true,
+      mfa_habilitado: true,
+      mfa_secreto_cifrado: true,
+    },
+  });
+
+  if (!usuario) {
+    throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
+  }
+
+  if (usuario.rol !== "ADMIN" || !usuario.mfa_habilitado) {
+    throw new AppError(
+      "El usuario no tiene MFA habilitado",
+      400,
+      "MFA_NOT_ENABLED",
+    );
+  }
+
+  if (!usuario.mfa_secreto_cifrado) {
+    throw new AppError(
+      "El secreto MFA no se encuentra configurado",
+      500,
+      "MFA_SECRET_NOT_CONFIGURED",
+    );
+  }
+
+  const secreto = descifrar(usuario.mfa_secreto_cifrado);
+
+  const codigoValido = await validarCodigoMfa(secreto, codigo);
+
+  if (!codigoValido) {
+    throw new AppError("Código MFA incorrecto", 401, "MFA_INVALID_CODE");
+  }
+
+  const token = generarTokenSesion(usuario);
+
+  return {
+    message: "Login correcto",
+    token,
+    requiereMfa: false,
+    usuario: {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      estado: usuario.estado,
+    },
+  };
+};
+
+/* =========================================================
+   VERIFICACIÓN MFA MEDIANTE CÓDIGO DE RECUPERACIÓN
+========================================================= */
+
+/**
+ * Completa el segundo factor utilizando un código
+ * de recuperación MFA.
+ *
+ * Este flujo se utiliza cuando el administrador
+ * no dispone del código TOTP generado por su
+ * aplicación autenticadora.
+ *
+ * Los códigos de recuperación funcionan como
+ * llaves de emergencia de un solo uso.
+ *
+ * Flujo:
+ *
+ * Email + contraseña
+ *        ↓
+ * MFA requerido
+ *        ↓
+ * Código recuperación
+ *        ↓
+ * Validación del código
+ *        ↓
+ * Generación JWT definitivo
+ */
+export const verificarMfaRecuperacionLoginUsuario = async (
+  usuarioId,
+  codigo,
+) => {
+  const usuario = await prisma.usuario.findUnique({
+    where: {
+      id: usuarioId,
+    },
+    select: {
+      id: true,
+      email: true,
+      rol: true,
+      estado: true,
+      version_sesion: true,
+      mfa_habilitado: true,
+    },
+  });
+
+  if (!usuario) {
+    throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
+  }
+
+  if (usuario.rol !== "ADMIN" || !usuario.mfa_habilitado) {
+    throw new AppError(
+      "El usuario no tiene MFA habilitado",
+      400,
+      "MFA_NOT_ENABLED",
+    );
+  }
+
+  const codigoValido = await validarCodigoRecuperacionMfa(usuario.id, codigo);
+
+  if (!codigoValido) {
+    throw new AppError(
+      "Código de recuperación MFA incorrecto",
+      401,
+      "MFA_RECOVERY_CODE_INVALID",
+    );
+  }
+
+  const token = generarTokenSesion(usuario);
+
+  return {
+    message: "Login correcto",
+    token,
+    requiereMfa: false,
+    usuario: {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+      estado: usuario.estado,
+    },
+  };
+};
+
+/* =========================================================
    CAMBIO DE PASSWORD
 ========================================================= */
 
-// Cambia una contraseña temporal por una contraseña definitiva.
-//
-// Este flujo:
-// - valida contraseña actual;
-// - valida nueva contraseña;
-// - elimina obligación de cambio;
-// - invalida sesiones anteriores.
 export const cambiarPasswordUsuario = async (
   email,
   passwordActual,
@@ -295,10 +497,7 @@ export const cambiarPasswordUsuario = async (
 ) => {
   const emailNormalizado = normalizarEmail(email);
 
-  validarCredenciales(
-    emailNormalizado,
-    passwordActual,
-  );
+  validarCredenciales(emailNormalizado, passwordActual);
 
   validarPasswordSegura(nuevaPassword);
 
@@ -323,10 +522,7 @@ export const cambiarPasswordUsuario = async (
 
   validarPasswordTemporalVigente(usuario);
 
-  const nuevoPasswordHash = await bcrypt.hash(
-    nuevaPassword,
-    10,
-  );
+  const nuevoPasswordHash = await bcrypt.hash(nuevaPassword, 10);
 
   await prisma.usuario.update({
     where: {
@@ -348,11 +544,232 @@ export const cambiarPasswordUsuario = async (
 };
 
 /* =========================================================
+   RECUPERACIÓN DE PASSWORD
+========================================================= */
+
+export const solicitarRecuperacionPassword = async (email) => {
+  const emailNormalizado = normalizarEmail(email);
+
+  validarEmailRecuperacion(emailNormalizado);
+
+  const respuestaPublica = {
+    message: MENSAJE_RECUPERACION_SOLICITADA,
+  };
+
+  const usuario = await prisma.usuario.findUnique({
+    where: {
+      email: emailNormalizado,
+    },
+    include: {
+      socio: {
+        select: {
+          nombre: true,
+        },
+      },
+    },
+  });
+
+  if (!usuario) {
+    return respuestaPublica;
+  }
+
+  const token = generarTokenRecuperacion();
+
+  const tokenHash = hashearTokenRecuperacion(token);
+
+  const expiraEn = new Date(Date.now() + RECUPERACION_PASSWORD_EXPIRA_MS);
+
+  const recuperacion = await prisma.$transaction(async (tx) => {
+    await tx.recuperacionPassword.updateMany({
+      where: {
+        usuario_id: usuario.id,
+        consumido_en: null,
+      },
+      data: {
+        consumido_en: new Date(),
+      },
+    });
+
+    const nuevaRecuperacion = await tx.recuperacionPassword.create({
+      data: {
+        usuario_id: usuario.id,
+        token_hash: tokenHash,
+        expira_en: expiraEn,
+      },
+    });
+
+    await registrarAuditoriaSistema(
+      {
+        accion: "SOLICITAR_RECUPERACION_PASSWORD",
+        entidad: "Usuario",
+        entidadId: usuario.id,
+        detalle:
+          "Se generó un enlace de recuperación de contraseña con vigencia de 30 minutos.",
+      },
+      tx,
+    );
+
+    return nuevaRecuperacion;
+  });
+
+  const recoveryUrl = construirRecoveryUrl(token);
+
+  try {
+    await enviarRecuperacionPassword({
+      nombre: usuario.socio?.nombre || "usuario",
+      email: usuario.email,
+      recoveryUrl,
+    });
+  } catch {
+    await prisma.recuperacionPassword.updateMany({
+      where: {
+        id: recuperacion.id,
+        consumido_en: null,
+      },
+      data: {
+        consumido_en: new Date(),
+      },
+    });
+
+    throw new AppError(
+      "No fue posible enviar el correo de recuperación",
+      503,
+      "AUTH_RECOVERY_EMAIL_FAILED",
+    );
+  }
+
+  return respuestaPublica;
+};
+export const restablecerPasswordUsuario = async (token, nuevaPassword) => {
+  if (typeof token !== "string" || !token.trim()) {
+    throw new AppError(
+      "El token de recuperación es obligatorio",
+      400,
+      "AUTH_RECOVERY_TOKEN_REQUIRED",
+    );
+  }
+
+  validarPasswordSegura(nuevaPassword);
+
+  const tokenHash = hashearTokenRecuperacion(token.trim());
+
+  const recuperacion = await prisma.recuperacionPassword.findUnique({
+    where: {
+      token_hash: tokenHash,
+    },
+    include: {
+      usuario: true,
+    },
+  });
+
+  if (
+    !recuperacion ||
+    recuperacion.consumido_en ||
+    new Date() > recuperacion.expira_en
+  ) {
+    throw new AppError(
+      "El enlace de recuperación es inválido o expiró",
+      400,
+      "AUTH_RECOVERY_TOKEN_INVALID",
+    );
+  }
+
+  const passwordReutilizada = await bcrypt.compare(
+    nuevaPassword,
+    recuperacion.usuario.password_hash,
+  );
+
+  if (passwordReutilizada) {
+    throw new AppError(
+      "La nueva contraseña debe ser diferente de la contraseña actual",
+      400,
+      "AUTH_PASSWORD_REUSE_NOT_ALLOWED",
+    );
+  }
+
+  const nuevoPasswordHash = await bcrypt.hash(nuevaPassword, 10);
+
+  await prisma.$transaction(async (tx) => {
+    const consumo = await tx.recuperacionPassword.updateMany({
+      where: {
+        id: recuperacion.id,
+        consumido_en: null,
+        expira_en: {
+          gt: new Date(),
+        },
+      },
+      data: {
+        consumido_en: new Date(),
+      },
+    });
+
+    if (consumo.count !== 1) {
+      throw new AppError(
+        "El enlace de recuperación es inválido o expiró",
+        400,
+        "AUTH_RECOVERY_TOKEN_INVALID",
+      );
+    }
+
+    await tx.recuperacionPassword.updateMany({
+      where: {
+        usuario_id: recuperacion.usuario_id,
+        consumido_en: null,
+      },
+      data: {
+        consumido_en: new Date(),
+      },
+    });
+
+    await tx.usuario.update({
+      where: {
+        id: recuperacion.usuario_id,
+      },
+      data: {
+        password_hash: nuevoPasswordHash,
+
+        requiere_cambio_password: false,
+
+        password_temporal_expira: null,
+
+        intentos_fallidos: 0,
+
+        ventana_intentos_desde: null,
+
+        ultimo_intento_fallido: null,
+
+        proximo_intento_desde: null,
+
+        version_sesion: {
+          increment: 1,
+        },
+      },
+    });
+
+    await registrarAuditoriaSistema(
+      {
+        accion: "RESTABLECER_PASSWORD",
+
+        entidad: "Usuario",
+
+        entidadId: recuperacion.usuario_id,
+
+        detalle:
+          "La contraseña fue restablecida mediante un enlace de recuperación y se invalidaron las sesiones anteriores.",
+      },
+      tx,
+    );
+  });
+
+  return {
+    message: "Contraseña restablecida correctamente",
+  };
+};
+
+/* =========================================================
    CIERRE DE SESIÓN
 ========================================================= */
 
-// Invalida todas las sesiones activas incrementando la versión.
-// Los JWT anteriores quedan rechazados automáticamente.
 export const cerrarSesion = async (usuarioId) => {
   const usuario = await prisma.usuario.findUnique({
     where: {
@@ -364,11 +781,7 @@ export const cerrarSesion = async (usuarioId) => {
   });
 
   if (!usuario) {
-    throw new AppError(
-      "Usuario no encontrado",
-      404,
-      "USER_NOT_FOUND",
-    );
+    throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
   }
 
   await prisma.usuario.update({

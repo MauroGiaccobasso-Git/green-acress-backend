@@ -4,12 +4,12 @@ import { AppError } from "../utils/appError.js";
 import {
   validarDocumento,
   validarEmail,
-  validarPassword,
   validarTelefono,
   validarTexto,
 } from "../utils/validaciones.js";
+import { generarPasswordTemporal } from "../utils/passwordUtils.js";
 import { registrarAuditoria } from "./auditoriaService.js";
-import { cancelarReservasActivasPorSocio } from "./reservaService.js";
+import { enviarPasswordTemporal } from "./email/emailService.js";
 
 /* =========================================================
    CONSTANTES DEL MÓDULO
@@ -171,25 +171,6 @@ const normalizarEmail = (email) => {
 // Normaliza campos numéricos almacenados como texto.
 const normalizarDatoNumerico = (valor) => {
   return String(valor ?? "").trim();
-};
-
-// Genera una contraseña temporal segura para nuevos socios.
-// La contraseña en texto plano solo existe durante el flujo de alta
-// para poder enviarla posteriormente mediante el servicio de email.
-// En base de datos siempre se almacena únicamente su hash.
-const generarPasswordTemporal = () => {
-  const caracteres =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%";
-
-  let password = "";
-
-  for (let i = 0; i < 12; i++) {
-    password += caracteres.charAt(
-      Math.floor(Math.random() * caracteres.length),
-    );
-  }
-
-  return password;
 };
 
 // Normaliza los datos obligatorios utilizados al crear un socio.
@@ -387,29 +368,6 @@ const validarCambioEstadoSocio = (socio, nuevoEstado) => {
       409,
     );
   }
-};
-
-// Valida y normaliza el motivo administrativo del cambio de estado.
-// Toda transición debe quedar justificada para conservar
-// la trazabilidad funcional y de auditoría.
-const validarMotivoCambioEstado = (motivo) => {
-  if (typeof motivo !== "string") {
-    throw new AppError(
-      "El motivo del cambio de estado es obligatorio",
-      400,
-    );
-  }
-
-  const motivoNormalizado = normalizarTexto(motivo);
-
-  if (!motivoNormalizado) {
-    throw new AppError(
-      "El motivo del cambio de estado es obligatorio",
-      400,
-    );
-  }
-
-  return motivoNormalizado;
 };
 
 // Impide inactivar un socio que todavía posee reservas activas.
@@ -614,7 +572,6 @@ const auditarCambioEstadoSocio = async (
     nuevoEstadoSocio,
     estadoAnteriorUsuario,
     nuevoEstadoUsuario,
-    motivo,
   },
   tx,
 ) => {
@@ -628,8 +585,7 @@ const auditarCambioEstadoSocio = async (
         `Se modificó el estado del socio ${socio.nombre} ${socio.apellido} ` +
         `de ${estadoAnteriorSocio} a ${nuevoEstadoSocio}. ` +
         `El estado de acceso del usuario cambió de ` +
-        `${estadoAnteriorUsuario} a ${nuevoEstadoUsuario}. ` +
-        `Motivo: ${motivo}.`,
+        `${estadoAnteriorUsuario} a ${nuevoEstadoUsuario}.`,
     },
     tx,
   );
@@ -718,6 +674,8 @@ export const getSocioPorId = async (id) => {
 ========================================================= */
 
 // Registra de forma atómica el Usuario, el Socio y su auditoría.
+// La contraseña temporal se envía únicamente después de confirmar
+// correctamente la transacción de base de datos.
 export const crearSocio = async ({
   usuarioId,
   email,
@@ -738,13 +696,12 @@ export const crearSocio = async ({
 
   validarDatosCreacionSocio(datosNormalizados);
 
-  // La contraseña temporal es generada automáticamente por el backend.
-  // Posteriormente será enviada mediante el servicio centralizado de email.
+  // La contraseña en texto plano existe únicamente durante este flujo.
+  // En base de datos se persiste exclusivamente su hash.
   const passwordTemporal = generarPasswordTemporal();
-
   const passwordHash = await bcrypt.hash(passwordTemporal, 10);
 
-  return prisma.$transaction(async (tx) => {
+  const socioCreado = await prisma.$transaction(async (tx) => {
     await validarDocumentoDuplicadoSocio(datosNormalizados.documento, null, tx);
 
     await validarEmailDuplicadoUsuario(datosNormalizados.email, null, tx);
@@ -782,6 +739,22 @@ export const crearSocio = async ({
 
     return socio;
   });
+
+  try {
+    await enviarPasswordTemporal({
+      nombre: socioCreado.nombre,
+      email: socioCreado.usuario.email,
+      passwordTemporal,
+    });
+  } catch (error) {
+    // Una falla externa de SMTP no revierte el alta ya confirmada.
+    console.error(
+      `No se pudo enviar la contraseña temporal al socio ${socioCreado.id}:`,
+      error,
+    );
+  }
+
+  return socioCreado;
 };
 
 // Actualiza únicamente los campos enviados y registra la operación.
@@ -851,12 +824,10 @@ export const cambiarEstadoSocio = async ({
   socioId,
   usuarioId,
   nuevoEstado,
-  motivo,
 }) => {
   const idSocio = validarIdSocio(socioId);
   const idUsuarioAdministrador = validarIdUsuario(usuarioId);
   const estadoSocioValidado = validarEstadoSocio(nuevoEstado);
-  const motivoValidado = validarMotivoCambioEstado(motivo);
 
   return prisma.$transaction(async (tx) => {
     const socioExistente = await obtenerSocioPorId(idSocio, tx);
@@ -868,20 +839,6 @@ export const cambiarEstadoSocio = async ({
       estadoSocioValidado,
       tx,
     );
-
-    // Al suspender al socio se cancelan todas sus reservas activas
-    // dentro de la misma transacción. ReservaService conserva la
-    // responsabilidad de liberar stock y registrar su trazabilidad.
-    if (estadoSocioValidado === "SUSPENDIDO") {
-      await cancelarReservasActivasPorSocio(
-        {
-          socioId: idSocio,
-          usuarioId: idUsuarioAdministrador,
-          motivo: motivoValidado,
-        },
-        tx,
-      );
-    }
 
     const nuevoEstadoUsuario =
       ESTADO_USUARIO_POR_ESTADO_SOCIO[estadoSocioValidado];
@@ -910,7 +867,6 @@ export const cambiarEstadoSocio = async ({
         nuevoEstadoSocio: estadoSocioValidado,
         estadoAnteriorUsuario: socioExistente.usuario.estado,
         nuevoEstadoUsuario,
-        motivo: motivoValidado,
       },
       tx,
     );
