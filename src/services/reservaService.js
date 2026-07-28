@@ -10,6 +10,11 @@ import {
   registrarAuditoriaSistema,
 } from "./auditoriaService.js";
 import { validarLimiteLegalMensual } from "./limiteLegalService.js";
+import {
+  notificarReservaConfirmada,
+  notificarReservaCancelada,
+  notificarReservaVencida,
+} from "./notificacionService.js";
 
 /* =========================================================
    CONSTANTES DEL MÓDULO
@@ -633,6 +638,32 @@ const calcularFechaLimiteRetiro = () => {
 };
 
 /* =========================================================
+   HELPERS DE NOTIFICACIONES
+========================================================= */
+
+const formatearFechaLimiteRetiro = (fecha) => {
+  return new Intl.DateTimeFormat("es-UY", {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: "America/Montevideo",
+  }).format(new Date(fecha));
+};
+
+const notificarCancelacionesReservas = async (
+  reservasParaNotificar,
+  { cancelacionPorSuspension = false } = {},
+) => {
+  for (const reserva of reservasParaNotificar) {
+    await notificarReservaCancelada({
+      socioId: reserva.socioId,
+      reservaId: reserva.reservaId,
+      motivo: reserva.motivo,
+      cancelacionPorSuspension,
+    });
+  }
+};
+
+/* =========================================================
    HELPERS DE PERSISTENCIA
 ========================================================= */
 
@@ -1065,7 +1096,7 @@ export const solicitarReserva = async ({
   const idUsuario = validarIdUsuario(usuarioId);
   const detallesNormalizados = validarDetallesReserva(detalles);
 
-  return prisma.$transaction(async (tx) => {
+  const reservaProcesada = await prisma.$transaction(async (tx) => {
     const socio = await obtenerSocioDesdeUsuario(idUsuario, tx);
     validarSocioActivo(socio);
 
@@ -1144,6 +1175,20 @@ export const solicitarReserva = async ({
 
     return obtenerReservaCompletaPorId(reserva.id, tx);
   });
+
+  if (reservaProcesada.estado === "CONFIRMADA") {
+    await notificarReservaConfirmada({
+      socioId: reservaProcesada.socio_id,
+      reservaId: reservaProcesada.id,
+      fechaLimiteRetiro: formatearFechaLimiteRetiro(
+        reservaProcesada.fecha_limite_retiro,
+      ),
+      detalles: reservaProcesada.detalles,
+      total: reservaProcesada.total,
+    });
+  }
+
+  return reservaProcesada;
 };
 
 export const confirmarRetiroReserva = async ({
@@ -1267,6 +1312,11 @@ export const cancelarReservasActivasPorSocio = async (
     return {
       cantidadCancelada: reservasActivas.length,
       reservasIds: reservasActivas.map((reserva) => reserva.id),
+      reservasParaNotificar: reservasActivas.map((reserva) => ({
+        socioId: idSocio,
+        reservaId: reserva.id,
+        motivo: motivoNormalizado,
+      })),
     };
   };
 
@@ -1274,7 +1324,28 @@ export const cancelarReservasActivasPorSocio = async (
     return operacion(txExterna);
   }
 
-  return prisma.$transaction(operacion);
+  const resultado = await prisma.$transaction(operacion);
+
+  await notificarCancelacionesReservas(resultado.reservasParaNotificar, {
+    cancelacionPorSuspension: true,
+  });
+
+  return resultado;
+};
+
+export const notificarCancelacionesReservasPorSuspension = async (
+  reservasParaNotificar,
+) => {
+  if (!Array.isArray(reservasParaNotificar)) {
+    throw new AppError(
+      "Las reservas a notificar deben proporcionarse en una lista",
+      400,
+    );
+  }
+
+  await notificarCancelacionesReservas(reservasParaNotificar, {
+    cancelacionPorSuspension: true,
+  });
 };
 
 export const cancelarReserva = async ({
@@ -1284,8 +1355,10 @@ export const cancelarReserva = async ({
 }) => {
   const idReserva = validarIdReserva(reservaId);
   const idUsuario = validarIdUsuario(usuarioId);
+  const motivoCancelacion =
+    String(observaciones ?? "").trim() || "Reserva cancelada manualmente.";
 
-  return prisma.$transaction(async (tx) => {
+  const reservaCancelada = await prisma.$transaction(async (tx) => {
     const reserva = await obtenerReservaParaCambioEstado(idReserva, tx);
 
     validarReservaCancelable(reserva);
@@ -1294,7 +1367,7 @@ export const cancelarReserva = async ({
       {
         reserva,
         usuarioId: idUsuario,
-        observaciones: observaciones || "Reserva cancelada manualmente.",
+        observaciones: motivoCancelacion,
         detalleAuditoria:
           "Reserva cancelada manualmente. Se liberó el stock reservado.",
       },
@@ -1303,6 +1376,16 @@ export const cancelarReserva = async ({
 
     return obtenerReservaCompletaPorId(idReserva, tx);
   });
+
+  await notificarReservaCancelada({
+    socioId: reservaCancelada.socio_id,
+    reservaId: reservaCancelada.id,
+    motivo: motivoCancelacion,
+    detalles: reservaCancelada.detalles,
+    total: reservaCancelada.total,
+  });
+
+  return reservaCancelada;
 };
 
 export const vencerReservasExpiradas = async () => {
@@ -1364,6 +1447,13 @@ export const vencerReservasExpiradas = async () => {
       );
 
       return obtenerReservaCompletaPorId(reserva.id, tx);
+    });
+
+    await notificarReservaVencida({
+      socioId: reservaProcesada.socio_id,
+      reservaId: reservaProcesada.id,
+      detalles: reservaProcesada.detalles,
+      total: reservaProcesada.total,
     });
 
     resultados.push(reservaProcesada);

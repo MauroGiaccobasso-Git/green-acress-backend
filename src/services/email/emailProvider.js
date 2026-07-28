@@ -54,7 +54,6 @@ const obtenerConfiguracionSmtp = () => {
   };
 };
 
-
 /* =========================================================
    TRANSPORTER
 ========================================================= */
@@ -70,7 +69,6 @@ const crearTransporter = () => {
   });
 };
 
-
 /* =========================================================
    OPERACIONES PRINCIPALES
 ========================================================= */
@@ -80,7 +78,6 @@ export const verificarConexionEmail = async () => {
 
   await transporter.verify();
 };
-
 
 export const enviarEmail = async ({
   destinatario,
@@ -98,7 +95,7 @@ export const enviarEmail = async ({
   const configuracion = obtenerConfiguracionSmtp();
   const transporter = crearTransporter();
 
-  return transporter.sendMail({
+  const resultado = await transporter.sendMail({
     from: {
       name: configuracion.remitente.nombre,
       address: configuracion.remitente.direccion,
@@ -108,4 +105,25 @@ export const enviarEmail = async ({
     text: texto,
     html,
   });
+
+  console.log("\n========== SMTP ==========");
+  console.log("Message ID :", resultado.messageId);
+  console.log("Accepted   :", resultado.accepted);
+  console.log("Rejected   :", resultado.rejected);
+  console.log("Pending    :", resultado.pending);
+  console.log("Response   :", resultado.response);
+  console.log("Envelope   :", resultado.envelope);
+  console.log("==========================\n");
+
+  if (
+    !Array.isArray(resultado.accepted) ||
+    resultado.accepted.length === 0
+  ) {
+    throw new AppError(
+      "El servidor SMTP no aceptó ningún destinatario",
+      502,
+    );
+  }
+
+  return resultado;
 };

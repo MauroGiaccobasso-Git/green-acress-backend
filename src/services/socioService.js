@@ -10,6 +10,10 @@ import {
 import { generarPasswordTemporal } from "../utils/passwordUtils.js";
 import { registrarAuditoria } from "./auditoriaService.js";
 import { enviarPasswordTemporal } from "./email/emailService.js";
+import {
+  cancelarReservasActivasPorSocio,
+  notificarCancelacionesReservasPorSuspension,
+} from "./reservaService.js";
 
 /* =========================================================
    CONSTANTES DEL MÓDULO
@@ -370,6 +374,23 @@ const validarCambioEstadoSocio = (socio, nuevoEstado) => {
   }
 };
 
+// Todo cambio de estado administrativo debe quedar respaldado
+// por un motivo explícito y trazable.
+const validarMotivoCambioEstado = (motivo) => {
+  const motivoNormalizado = String(motivo ?? "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+  if (!motivoNormalizado) {
+    throw new AppError(
+      "El motivo del cambio de estado es obligatorio",
+      400,
+    );
+  }
+
+  return motivoNormalizado;
+};
+
 // Impide inactivar un socio que todavía posee reservas activas.
 // Las reservas PENDIENTES o CONFIRMADAS deben resolverse antes
 // de restringir sus operaciones dentro del sistema.
@@ -572,6 +593,7 @@ const auditarCambioEstadoSocio = async (
     nuevoEstadoSocio,
     estadoAnteriorUsuario,
     nuevoEstadoUsuario,
+    motivo,
   },
   tx,
 ) => {
@@ -585,7 +607,8 @@ const auditarCambioEstadoSocio = async (
         `Se modificó el estado del socio ${socio.nombre} ${socio.apellido} ` +
         `de ${estadoAnteriorSocio} a ${nuevoEstadoSocio}. ` +
         `El estado de acceso del usuario cambió de ` +
-        `${estadoAnteriorUsuario} a ${nuevoEstadoUsuario}.`,
+        `${estadoAnteriorUsuario} a ${nuevoEstadoUsuario}. ` +
+        `Motivo: ${motivo}.`,
     },
     tx,
   );
@@ -820,16 +843,21 @@ export const actualizarSocio = async ({ socioId, usuarioId, datosSocio }) => {
 };
 
 // Sincroniza el estado funcional del Socio con el acceso de su Usuario.
+// Si el nuevo estado es SUSPENDIDO, las reservas activas se cancelan
+// dentro de la misma transacción y sus correos se envían únicamente
+// después de confirmar toda la operación en base de datos.
 export const cambiarEstadoSocio = async ({
   socioId,
   usuarioId,
   nuevoEstado,
+  motivo,
 }) => {
   const idSocio = validarIdSocio(socioId);
   const idUsuarioAdministrador = validarIdUsuario(usuarioId);
   const estadoSocioValidado = validarEstadoSocio(nuevoEstado);
+  const motivoNormalizado = validarMotivoCambioEstado(motivo);
 
-  return prisma.$transaction(async (tx) => {
+  const resultado = await prisma.$transaction(async (tx) => {
     const socioExistente = await obtenerSocioPorId(idSocio, tx);
 
     validarCambioEstadoSocio(socioExistente, estadoSocioValidado);
@@ -839,6 +867,21 @@ export const cambiarEstadoSocio = async ({
       estadoSocioValidado,
       tx,
     );
+
+    let reservasParaNotificar = [];
+
+    if (estadoSocioValidado === "SUSPENDIDO") {
+      const cancelacionReservas = await cancelarReservasActivasPorSocio(
+        {
+          socioId: idSocio,
+          usuarioId: idUsuarioAdministrador,
+          motivo: motivoNormalizado,
+        },
+        tx,
+      );
+
+      reservasParaNotificar = cancelacionReservas.reservasParaNotificar;
+    }
 
     const nuevoEstadoUsuario =
       ESTADO_USUARIO_POR_ESTADO_SOCIO[estadoSocioValidado];
@@ -867,12 +910,24 @@ export const cambiarEstadoSocio = async ({
         nuevoEstadoSocio: estadoSocioValidado,
         estadoAnteriorUsuario: socioExistente.usuario.estado,
         nuevoEstadoUsuario,
+        motivo: motivoNormalizado,
       },
       tx,
     );
 
-    return socioActualizado;
+    return {
+      socioActualizado,
+      reservasParaNotificar,
+    };
   });
+
+  if (resultado.reservasParaNotificar.length > 0) {
+    await notificarCancelacionesReservasPorSuspension(
+      resultado.reservasParaNotificar,
+    );
+  }
+
+  return resultado.socioActualizado;
 };
 
 /* =========================================================
