@@ -42,6 +42,13 @@ const RETARDOS_LOGIN = {
 // Tiempo de vigencia de un enlace de recuperación.
 const RECUPERACION_PASSWORD_EXPIRA_MS = 30 * 60 * 1000;
 
+// Tiempo de vigencia del desafío utilizado para completar el login con MFA.
+const DESAFIO_MFA_EXPIRA_MS = 5 * 60 * 1000;
+
+// Cantidad máxima de códigos incorrectos permitidos
+// antes de invalidar el desafío MFA.
+const MAX_INTENTOS_DESAFIO_MFA = 5;
+
 /* =========================================================
    HELPERS
 ========================================================= */
@@ -126,6 +133,92 @@ const generarTokenRecuperacion = () => randomBytes(32).toString("hex");
 // Genera un hash irreversible del token recibido por email.
 const hashearTokenRecuperacion = (token) =>
   createHash("sha256").update(token).digest("hex");
+
+// Genera un ticket criptográficamente seguro para completar el login con MFA.
+const generarTokenDesafioMfa = () => randomBytes(32).toString("hex");
+
+// Genera el hash irreversible del ticket MFA.
+// El ticket original únicamente será entregado al frontend.
+const hashearTokenDesafioMfa = (token) =>
+  createHash("sha256").update(token).digest("hex");
+
+/**
+ * Crea un desafío temporal para completar el segundo factor de autenticación.
+ *
+ * Flujo:
+ * Ticket original
+ *        ↓
+ * Hash del ticket
+ *        ↓
+ * Almacenamiento del hash en la base de datos
+ *        ↓
+ * Devolución del ticket original al frontend
+ *
+ * El desafío tiene una vigencia limitada y será utilizado
+ * posteriormente para completar el proceso de login MFA.
+ */
+const crearDesafioMfa = async (usuarioId) => {
+  const token = generarTokenDesafioMfa();
+  const tokenHash = hashearTokenDesafioMfa(token);
+
+  await prisma.desafioAutenticacion.create({
+    data: {
+      usuario_id: usuarioId,
+      tipo: "VERIFICACION_MFA",
+      token_hash: tokenHash,
+      expira_en: new Date(Date.now() + DESAFIO_MFA_EXPIRA_MS),
+    },
+  });
+
+  return token;
+};
+
+/**
+ * Registra un intento fallido sobre un desafío MFA.
+ *
+ * Cuando se alcanza el máximo permitido:
+ * - incrementa el contador;
+ * - consume el desafío;
+ * - obliga al usuario a iniciar nuevamente el login.
+ *
+ * La actualización es condicional para evitar inconsistencias
+ * si llegan solicitudes simultáneas sobre el mismo desafío.
+ */
+const registrarIntentoFallidoDesafioMfa = async (desafioId) => {
+  const desafioActualizado = await prisma.desafioAutenticacion.update({
+    where: {
+      id: desafioId,
+    },
+    data: {
+      intentos: {
+        increment: 1,
+      },
+    },
+    select: {
+      intentos: true,
+    },
+  });
+
+  if (desafioActualizado.intentos < MAX_INTENTOS_DESAFIO_MFA) {
+    return;
+  }
+
+  await prisma.desafioAutenticacion.updateMany({
+    where: {
+      id: desafioId,
+      consumido_en: null,
+    },
+    data: {
+      consumido_en: new Date(),
+    },
+  });
+
+  throw new AppError(
+    "Se alcanzó el máximo de intentos MFA permitidos",
+    401,
+    "MFA_CHALLENGE_MAX_ATTEMPTS",
+  );
+};
 
 // Construye la URL que recibirá el socio por correo.
 const construirRecoveryUrl = (token) => {
@@ -298,14 +391,15 @@ export const loginUsuario = async (email, password) => {
     autenticadora.
   */
   if (usuario.rol === "ADMIN" && usuario.mfa_habilitado) {
+    const mfaChallengeToken = await crearDesafioMfa(usuario.id);
+
     return {
       message: "Código MFA requerido",
       requiereMfa: true,
+      mfaChallengeToken,
       usuario: {
-        id: usuario.id,
         email: usuario.email,
         rol: usuario.rol,
-        estado: usuario.estado,
       },
     };
   }
@@ -324,12 +418,22 @@ export const loginUsuario = async (email, password) => {
     },
   };
 };
+const validarCodigoMfaObligatorio = (codigo) => {
+  if (typeof codigo !== "string" || !codigo.trim()) {
+    throw new AppError(
+      "El código MFA es obligatorio",
+      400,
+      "MFA_CODE_REQUIRED",
+    );
+  }
 
+  return codigo.trim();
+};
 /* =========================================================
    VERIFICACIÓN MFA LOGIN
 ========================================================= */
 
-/**
+/*
  * Completa el segundo factor de autenticación
  * para administradores con MFA habilitado.
  *
@@ -337,18 +441,45 @@ export const loginUsuario = async (email, password) => {
  *
  * Email + contraseña
  *        ↓
- * MFA requerido
+ * Creación del desafío MFA
+ *        ↓
+ * Entrega del ticket temporal
  *        ↓
  * Código TOTP
  *        ↓
+ * Validación del desafío MFA
+ *        ↓
  * Validación del secreto MFA
  *        ↓
- * Generación JWT definitivo
+ * Generación del JWT definitivo
  */
-export const verificarMfaLoginUsuario = async (usuarioId, codigo) => {
+export const verificarMfaLoginUsuario = async (mfaChallengeToken, codigo) => {
+  const codigoNormalizado = validarCodigoMfaObligatorio(codigo);
+  const tokenHash = hashearTokenDesafioMfa(mfaChallengeToken);
+
+  const desafio = await prisma.desafioAutenticacion.findFirst({
+    where: {
+      tipo: "VERIFICACION_MFA",
+      token_hash: tokenHash,
+      consumido_en: null,
+    },
+  });
+
+  if (!desafio) {
+    throw new AppError(
+      "El desafío MFA no es válido",
+      401,
+      "MFA_CHALLENGE_INVALID",
+    );
+  }
+
+  if (desafio.expira_en < new Date()) {
+    throw new AppError("El desafío MFA expiró", 401, "MFA_CHALLENGE_EXPIRED");
+  }
+
   const usuario = await prisma.usuario.findUnique({
     where: {
-      id: usuarioId,
+      id: desafio.usuario_id,
     },
     select: {
       id: true,
@@ -363,6 +494,14 @@ export const verificarMfaLoginUsuario = async (usuarioId, codigo) => {
 
   if (!usuario) {
     throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
+  }
+
+  if (usuario.estado !== "ACTIVO") {
+    throw new AppError(
+      "El usuario no se encuentra habilitado",
+      403,
+      "USER_NOT_ACTIVE",
+    );
   }
 
   if (usuario.rol !== "ADMIN" || !usuario.mfa_habilitado) {
@@ -382,11 +521,30 @@ export const verificarMfaLoginUsuario = async (usuarioId, codigo) => {
   }
 
   const secreto = descifrar(usuario.mfa_secreto_cifrado);
-
-  const codigoValido = await validarCodigoMfa(secreto, codigo);
+  const codigoValido = await validarCodigoMfa(secreto, codigoNormalizado);
 
   if (!codigoValido) {
+    await registrarIntentoFallidoDesafioMfa(desafio.id);
+
     throw new AppError("Código MFA incorrecto", 401, "MFA_INVALID_CODE");
+  }
+
+  const desafioConsumido = await prisma.desafioAutenticacion.updateMany({
+    where: {
+      id: desafio.id,
+      consumido_en: null,
+    },
+    data: {
+      consumido_en: new Date(),
+    },
+  });
+
+  if (desafioConsumido.count !== 1) {
+    throw new AppError(
+      "El desafío MFA ya fue utilizado",
+      401,
+      "MFA_CHALLENGE_ALREADY_USED",
+    );
   }
 
   const token = generarTokenSesion(usuario);
@@ -409,35 +567,56 @@ export const verificarMfaLoginUsuario = async (usuarioId, codigo) => {
 ========================================================= */
 
 /**
- * Completa el segundo factor utilizando un código
- * de recuperación MFA.
- *
- * Este flujo se utiliza cuando el administrador
- * no dispone del código TOTP generado por su
- * aplicación autenticadora.
- *
- * Los códigos de recuperación funcionan como
- * llaves de emergencia de un solo uso.
+ * Completa el segundo factor mediante un código de recuperación MFA.
  *
  * Flujo:
  *
  * Email + contraseña
  *        ↓
- * MFA requerido
+ * Creación del desafío MFA
  *        ↓
- * Código recuperación
+ * Entrega del ticket temporal
  *        ↓
- * Validación del código
+ * Código de recuperación
  *        ↓
- * Generación JWT definitivo
+ * Validación del desafío MFA
+ *        ↓
+ * Consumo del código de recuperación
+ *        ↓
+ * Consumo del desafío MFA
+ *        ↓
+ * Generación del JWT definitivo
  */
 export const verificarMfaRecuperacionLoginUsuario = async (
-  usuarioId,
+  mfaChallengeToken,
   codigo,
 ) => {
+  const codigoNormalizado = validarCodigoMfaObligatorio(codigo);
+  const tokenHash = hashearTokenDesafioMfa(mfaChallengeToken);
+
+  const desafio = await prisma.desafioAutenticacion.findFirst({
+    where: {
+      tipo: "VERIFICACION_MFA",
+      token_hash: tokenHash,
+      consumido_en: null,
+    },
+  });
+
+  if (!desafio) {
+    throw new AppError(
+      "El desafío MFA no es válido",
+      401,
+      "MFA_CHALLENGE_INVALID",
+    );
+  }
+
+  if (desafio.expira_en < new Date()) {
+    throw new AppError("El desafío MFA expiró", 401, "MFA_CHALLENGE_EXPIRED");
+  }
+
   const usuario = await prisma.usuario.findUnique({
     where: {
-      id: usuarioId,
+      id: desafio.usuario_id,
     },
     select: {
       id: true,
@@ -453,6 +632,14 @@ export const verificarMfaRecuperacionLoginUsuario = async (
     throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
   }
 
+  if (usuario.estado !== "ACTIVO") {
+    throw new AppError(
+      "El usuario no se encuentra habilitado",
+      403,
+      "USER_NOT_ACTIVE",
+    );
+  }
+
   if (usuario.rol !== "ADMIN" || !usuario.mfa_habilitado) {
     throw new AppError(
       "El usuario no tiene MFA habilitado",
@@ -461,13 +648,34 @@ export const verificarMfaRecuperacionLoginUsuario = async (
     );
   }
 
-  const codigoValido = await validarCodigoRecuperacionMfa(usuario.id, codigo);
+  const codigoValido = await validarCodigoRecuperacionMfa(
+    usuario.id,
+    codigoNormalizado,
+  );
 
   if (!codigoValido) {
     throw new AppError(
       "Código de recuperación MFA incorrecto",
       401,
       "MFA_RECOVERY_CODE_INVALID",
+    );
+  }
+
+  const desafioConsumido = await prisma.desafioAutenticacion.updateMany({
+    where: {
+      id: desafio.id,
+      consumido_en: null,
+    },
+    data: {
+      consumido_en: new Date(),
+    },
+  });
+
+  if (desafioConsumido.count !== 1) {
+    throw new AppError(
+      "El desafío MFA ya fue utilizado",
+      401,
+      "MFA_CHALLENGE_ALREADY_USED",
     );
   }
 

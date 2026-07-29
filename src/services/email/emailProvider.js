@@ -24,19 +24,13 @@ const obtenerConfiguracionSmtp = () => {
     !EMAIL_FROM_NAME ||
     !EMAIL_FROM_ADDRESS
   ) {
-    throw new AppError(
-      "La configuración SMTP está incompleta",
-      500,
-    );
+    throw new AppError("La configuración SMTP está incompleta", 500);
   }
 
   const puerto = Number(SMTP_PORT);
 
   if (!Number.isInteger(puerto) || puerto <= 0) {
-    throw new AppError(
-      "El puerto SMTP configurado es inválido",
-      500,
-    );
+    throw new AppError("El puerto SMTP configurado es inválido", 500);
   }
 
   return {
@@ -79,17 +73,9 @@ export const verificarConexionEmail = async () => {
   await transporter.verify();
 };
 
-export const enviarEmail = async ({
-  destinatario,
-  asunto,
-  texto,
-  html,
-}) => {
+export const enviarEmail = async ({ destinatario, asunto, texto, html }) => {
   if (!destinatario || !asunto || (!texto && !html)) {
-    throw new AppError(
-      "Los datos del email son obligatorios",
-      400,
-    );
+    throw new AppError("Los datos del email son obligatorios", 400);
   }
 
   const configuracion = obtenerConfiguracionSmtp();
@@ -106,23 +92,8 @@ export const enviarEmail = async ({
     html,
   });
 
-  console.log("\n========== SMTP ==========");
-  console.log("Message ID :", resultado.messageId);
-  console.log("Accepted   :", resultado.accepted);
-  console.log("Rejected   :", resultado.rejected);
-  console.log("Pending    :", resultado.pending);
-  console.log("Response   :", resultado.response);
-  console.log("Envelope   :", resultado.envelope);
-  console.log("==========================\n");
-
-  if (
-    !Array.isArray(resultado.accepted) ||
-    resultado.accepted.length === 0
-  ) {
-    throw new AppError(
-      "El servidor SMTP no aceptó ningún destinatario",
-      502,
-    );
+  if (!Array.isArray(resultado.accepted) || resultado.accepted.length === 0) {
+    throw new AppError("El servidor SMTP no aceptó ningún destinatario", 502);
   }
 
   return resultado;

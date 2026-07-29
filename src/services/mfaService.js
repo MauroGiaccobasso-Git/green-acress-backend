@@ -1,6 +1,7 @@
 import prisma from "../config/prisma.js";
 import { generateSecret, verify } from "otplib";
 import bcrypt from "bcrypt";
+import { randomInt } from "node:crypto";
 
 import { AppError } from "../utils/appError.js";
 import { cifrar, descifrar } from "../utils/encryption.js";
@@ -21,27 +22,29 @@ export const generarSecretoMfa = () => {
   return generateSecret();
 };
 
-
 /* =========================================================
    VALIDACIÓN TOTP
 ========================================================= */
 
 export const validarCodigoMfa = async (secreto, codigo) => {
+  if (typeof codigo !== "string" || !codigo.trim()) {
+    return false;
+  }
+
   const resultado = await verify({
     secret: secreto,
-    token: codigo,
+    token: codigo.trim(),
   });
 
   return resultado.valid;
 };
-
 
 /* =========================================================
    VALIDACIÓN CÓDIGO DE RECUPERACIÓN MFA
 ========================================================= */
 
 /**
- * Valida un código de recuperación MFA.
+ * Valida y consume de forma segura un código de recuperación MFA.
  *
  * Los códigos de recuperación funcionan como llaves
  * de emergencia de un solo uso cuando el administrador
@@ -50,7 +53,7 @@ export const validarCodigoMfa = async (secreto, codigo) => {
  *
  * Flujo:
  *
- * ADMIN ingresa código recuperación
+ * ADMIN ingresa código de recuperación
  *          ↓
  * Backend obtiene hashes disponibles
  *          ↓
@@ -58,94 +61,97 @@ export const validarCodigoMfa = async (secreto, codigo) => {
  *          ↓
  * Código válido
  *          ↓
- * Marca código como utilizado
+ * Intenta marcarlo como utilizado
+ *          ↓
+ * Solo una solicitud puede consumirlo
  */
-export const validarCodigoRecuperacionMfa = async (
-  usuarioId,
-  codigo,
-) => {
-
+export const validarCodigoRecuperacionMfa = async (usuarioId, codigo) => {
   if (!codigo || typeof codigo !== "string") {
     return false;
   }
 
+  const codigoNormalizado = codigo.trim().toUpperCase();
 
-  const codigosDisponibles =
-    await prisma.codigoRecuperacionMfa.findMany({
+  const codigosDisponibles = await prisma.codigoRecuperacionMfa.findMany({
+    where: {
+      usuario_id: usuarioId,
+      usado_en: null,
+    },
+  });
+
+  for (const codigoRecuperacion of codigosDisponibles) {
+    const codigoValido = await bcrypt.compare(
+      codigoNormalizado,
+      codigoRecuperacion.codigo_hash,
+    );
+
+    if (!codigoValido) {
+      continue;
+    }
+
+    const codigoConsumido = await prisma.codigoRecuperacionMfa.updateMany({
       where: {
-        usuario_id: usuarioId,
+        id: codigoRecuperacion.id,
         usado_en: null,
+      },
+      data: {
+        usado_en: new Date(),
       },
     });
 
-
-  for (const codigoRecuperacion of codigosDisponibles) {
-
-    const codigoValido =
-      await bcrypt.compare(
-        codigo,
-        codigoRecuperacion.codigo_hash,
-      );
-
-
-    if (codigoValido) {
-
-      await prisma.codigoRecuperacionMfa.update({
-        where: {
-          id: codigoRecuperacion.id,
-        },
-        data: {
-          usado_en: new Date(),
-        },
-      });
-
-
-      return true;
-    }
+    return codigoConsumido.count === 1;
   }
-
 
   return false;
 };
-
 
 /* =========================================================
    CÓDIGOS DE RECUPERACIÓN MFA
 ========================================================= */
 
+/**
+ * Genera los códigos de recuperación MFA.
+ *
+ * Los códigos:
+ * - son únicos dentro del mismo lote;
+ * - se muestran una sola vez al administrador;
+ * - se guardan posteriormente como hash;
+ * - pueden utilizarse una única vez.
+ */
 export const generarCodigosRecuperacionMfa = async () => {
-  const codigos = [];
+  const codigosUnicos = new Set();
 
-  for (let i = 0; i < CANTIDAD_CODIGOS_RECUPERACION; i++) {
+  while (codigosUnicos.size < CANTIDAD_CODIGOS_RECUPERACION) {
+    const codigo = `${generarBloqueCodigo()}-${generarBloqueCodigo()}`;
 
-    const codigo =
-      `${generarBloqueCodigo()}-${generarBloqueCodigo()}`;
-
-
-    const hash =
-      await bcrypt.hash(
-        codigo,
-        10,
-      );
-
-
-    codigos.push({
-      codigo,
-      hash,
-    });
+    codigosUnicos.add(codigo);
   }
 
-  return codigos;
+  return Promise.all(
+    Array.from(codigosUnicos).map(async (codigo) => ({
+      codigo,
+      hash: await bcrypt.hash(codigo, 10),
+    })),
+  );
 };
-
 
 /* =========================================================
    CONFIGURACIÓN MFA USUARIO
 ========================================================= */
 
+/**
+ * Inicia la configuración MFA para un administrador.
+ *
+ * Este proceso:
+ * - solo puede ser ejecutado por un ADMIN activo;
+ * - no permite sobrescribir una configuración MFA ya habilitada;
+ * - genera un nuevo secreto MFA;
+ * - reemplaza cualquier configuración pendiente anterior;
+ * - genera nuevos códigos de recuperación;
+ * - mantiene MFA deshabilitado hasta confirmar el código TOTP.
+ */
 export const configurarMfaUsuario = async (usuarioId) => {
   return prisma.$transaction(async (tx) => {
-
     const usuario = await tx.usuario.findUnique({
       where: {
         id: usuarioId,
@@ -154,18 +160,14 @@ export const configurarMfaUsuario = async (usuarioId) => {
         id: true,
         email: true,
         rol: true,
+        estado: true,
+        mfa_habilitado: true,
       },
     });
 
-
     if (!usuario) {
-      throw new AppError(
-        "Usuario no encontrado",
-        404,
-        "USER_NOT_FOUND",
-      );
+      throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
     }
-
 
     if (usuario.rol !== "ADMIN") {
       throw new AppError(
@@ -175,14 +177,26 @@ export const configurarMfaUsuario = async (usuarioId) => {
       );
     }
 
+    if (usuario.estado !== "ACTIVO") {
+      throw new AppError(
+        "El usuario no se encuentra habilitado",
+        403,
+        "USER_NOT_ACTIVE",
+      );
+    }
 
-    const secreto =
-      generarSecretoMfa();
+    if (usuario.mfa_habilitado) {
+      throw new AppError(
+        "El MFA ya se encuentra habilitado",
+        409,
+        "MFA_ALREADY_ENABLED",
+      );
+    }
 
+    const secreto = generarSecretoMfa();
+    const secretoCifrado = cifrar(secreto);
 
-    const secretoCifrado =
-      cifrar(secreto);
-
+    const codigos = await generarCodigosRecuperacionMfa();
 
     await tx.codigoRecuperacionMfa.deleteMany({
       where: {
@@ -190,18 +204,12 @@ export const configurarMfaUsuario = async (usuarioId) => {
       },
     });
 
-
-    const codigos =
-      await generarCodigosRecuperacionMfa();
-
-
     await tx.codigoRecuperacionMfa.createMany({
       data: codigos.map((codigo) => ({
         usuario_id: usuario.id,
         codigo_hash: codigo.hash,
       })),
     });
-
 
     await tx.usuario.update({
       where: {
@@ -214,29 +222,23 @@ export const configurarMfaUsuario = async (usuarioId) => {
       },
     });
 
-
     await registrarAuditoria(
       {
         usuarioId: usuario.id,
         accion: "CONFIGURAR_MFA",
         entidad: "Usuario",
         entidadId: usuario.id,
-        detalle:
-          "Se inició la configuración MFA del administrador.",
+        detalle: "Se inició la configuración MFA del administrador.",
       },
       tx,
     );
 
-
     return {
       secreto,
-      codigosRecuperacion:
-        codigos.map((codigo) => codigo.codigo),
+      codigosRecuperacion: codigos.map((codigo) => codigo.codigo),
     };
   });
 };
-
-
 /* =========================================================
    CONFIRMAR MFA
 ========================================================= */
@@ -258,13 +260,8 @@ export const configurarMfaUsuario = async (usuarioId) => {
  *        ↓
  * Activa MFA
  */
-export const confirmarMfaUsuario = async (
-  usuarioId,
-  codigo,
-) => {
-
+export const confirmarMfaUsuario = async (usuarioId, codigo) => {
   return prisma.$transaction(async (tx) => {
-
     const usuario = await tx.usuario.findUnique({
       where: {
         id: usuarioId,
@@ -277,15 +274,9 @@ export const confirmarMfaUsuario = async (
       },
     });
 
-
     if (!usuario) {
-      throw new AppError(
-        "Usuario no encontrado",
-        404,
-        "USER_NOT_FOUND",
-      );
+      throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
     }
-
 
     if (usuario.rol !== "ADMIN") {
       throw new AppError(
@@ -295,7 +286,6 @@ export const confirmarMfaUsuario = async (
       );
     }
 
-
     if (!usuario.mfa_secreto_cifrado) {
       throw new AppError(
         "El usuario no tiene una configuración MFA iniciada",
@@ -303,7 +293,6 @@ export const confirmarMfaUsuario = async (
         "MFA_NOT_CONFIGURED",
       );
     }
-
 
     if (usuario.mfa_habilitado) {
       throw new AppError(
@@ -313,17 +302,9 @@ export const confirmarMfaUsuario = async (
       );
     }
 
+    const secreto = descifrar(usuario.mfa_secreto_cifrado);
 
-    const secreto =
-      descifrar(usuario.mfa_secreto_cifrado);
-
-
-    const codigoValido =
-      await validarCodigoMfa(
-        secreto,
-        codigo,
-      );
-
+    const codigoValido = await validarCodigoMfa(secreto, codigo);
 
     if (!codigoValido) {
       throw new AppError(
@@ -332,7 +313,6 @@ export const confirmarMfaUsuario = async (
         "MFA_INVALID_CODE",
       );
     }
-
 
     await tx.usuario.update({
       where: {
@@ -343,19 +323,16 @@ export const confirmarMfaUsuario = async (
       },
     });
 
-
     await registrarAuditoria(
       {
         usuarioId: usuario.id,
         accion: "ACTIVAR_MFA",
         entidad: "Usuario",
         entidadId: usuario.id,
-        detalle:
-          "El administrador confirmó y activó MFA correctamente.",
+        detalle: "El administrador confirmó y activó MFA correctamente.",
       },
       tx,
     );
-
 
     return {
       message: "MFA activado correctamente",
@@ -363,35 +340,27 @@ export const confirmarMfaUsuario = async (
   });
 };
 
-
 /* =========================================================
    HELPERS PRIVADOS
 ========================================================= */
 
+/**
+ * Genera un bloque aleatorio para un código de recuperación.
+ *
+ * Cada carácter se obtiene mediante un generador
+ * criptográficamente seguro.
+ *
+ * Ejemplos:
+ *
+ * A7KD
+ * X91P
+ * M4QZ
+ */
 const generarBloqueCodigo = () => {
+  const caracteres = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-  const caracteres =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-
-  let resultado = "";
-
-
-  for (
-    let i = 0;
-    i < LONGITUD_BLOQUE_CODIGO;
-    i++
-  ) {
-
-    const posicion =
-      Math.floor(
-        Math.random() * caracteres.length,
-      );
-
-
-    resultado += caracteres[posicion];
-  }
-
-
-  return resultado;
+  return Array.from(
+    { length: LONGITUD_BLOQUE_CODIGO },
+    () => caracteres[randomInt(caracteres.length)],
+  ).join("");
 };
