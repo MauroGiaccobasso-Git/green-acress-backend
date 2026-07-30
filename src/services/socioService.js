@@ -382,10 +382,7 @@ const validarMotivoCambioEstado = (motivo) => {
     .replace(/\s+/g, " ");
 
   if (!motivoNormalizado) {
-    throw new AppError(
-      "El motivo del cambio de estado es obligatorio",
-      400,
-    );
+    throw new AppError("El motivo del cambio de estado es obligatorio", 400);
   }
 
   return motivoNormalizado;

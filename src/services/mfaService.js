@@ -309,7 +309,7 @@ export const confirmarMfaUsuario = async (usuarioId, codigo) => {
     if (!codigoValido) {
       throw new AppError(
         "El código MFA es incorrecto",
-        401,
+        400,
         "MFA_INVALID_CODE",
       );
     }
@@ -336,6 +336,152 @@ export const confirmarMfaUsuario = async (usuarioId, codigo) => {
 
     return {
       message: "MFA activado correctamente",
+    };
+  });
+};
+
+/* =========================================================
+   DESACTIVAR MFA
+========================================================= */
+
+/**
+ * Desactiva MFA para un administrador.
+ *
+ * Requiere confirmación adicional mediante:
+ * - contraseña actual;
+ * - código TOTP vigente.
+ *
+ * Flujo:
+ *
+ * ADMIN autenticado
+ *        ↓
+ * Ingresa contraseña actual
+ *        ↓
+ * Ingresa código TOTP
+ *        ↓
+ * Backend valida identidad
+ *        ↓
+ * Elimina configuración MFA
+ *        ↓
+ * Invalida sesiones existentes
+ *        ↓
+ * Registra auditoría
+ */
+export const desactivarMfaUsuario = async (
+  usuarioId,
+  passwordActual,
+  codigo,
+) => {
+  return prisma.$transaction(async (tx) => {
+    const usuario = await tx.usuario.findUnique({
+      where: {
+        id: usuarioId,
+      },
+      select: {
+        id: true,
+        rol: true,
+        estado: true,
+        password_hash: true,
+        mfa_habilitado: true,
+        mfa_secreto_cifrado: true,
+      },
+    });
+
+    if (!usuario) {
+      throw new AppError("Usuario no encontrado", 404, "USER_NOT_FOUND");
+    }
+
+    if (usuario.rol !== "ADMIN") {
+      throw new AppError(
+        "Solo los administradores pueden gestionar MFA",
+        403,
+        "MFA_ADMIN_ONLY",
+      );
+    }
+
+    if (usuario.estado !== "ACTIVO") {
+      throw new AppError(
+        "El usuario no se encuentra habilitado",
+        403,
+        "USER_NOT_ACTIVE",
+      );
+    }
+
+    if (!usuario.mfa_habilitado) {
+      throw new AppError(
+        "El MFA no se encuentra habilitado",
+        400,
+        "MFA_NOT_ENABLED",
+      );
+    }
+
+    const passwordValida = await bcrypt.compare(
+      passwordActual,
+      usuario.password_hash,
+    );
+
+    if (!passwordValida) {
+      throw new AppError(
+        "La contraseña actual es incorrecta",
+        400,
+        "INVALID_CURRENT_PASSWORD",
+      );
+    }
+
+    if (!usuario.mfa_secreto_cifrado) {
+      throw new AppError(
+        "No existe una configuración MFA válida",
+        400,
+        "MFA_NOT_CONFIGURED",
+      );
+    }
+
+    const secreto = descifrar(usuario.mfa_secreto_cifrado);
+
+    const codigoValido = await validarCodigoMfa(secreto, codigo);
+
+    if (!codigoValido) {
+      throw new AppError(
+        "El código MFA es incorrecto",
+        400,
+        "MFA_INVALID_CODE",
+      );
+    }
+
+    await tx.codigoRecuperacionMfa.deleteMany({
+      where: {
+        usuario_id: usuario.id,
+      },
+    });
+
+    await tx.usuario.update({
+      where: {
+        id: usuario.id,
+      },
+      data: {
+        mfa_habilitado: false,
+        mfa_secreto_cifrado: null,
+        fecha_configuracion_mfa: null,
+        version_sesion: {
+          increment: 1,
+        },
+      },
+    });
+
+    await registrarAuditoria(
+      {
+        usuarioId: usuario.id,
+        accion: "DESACTIVAR_MFA",
+        entidad: "Usuario",
+        entidadId: usuario.id,
+        detalle:
+          "El administrador desactivó MFA y se eliminaron las configuraciones asociadas.",
+      },
+      tx,
+    );
+
+    return {
+      message: "MFA desactivado correctamente",
     };
   });
 };

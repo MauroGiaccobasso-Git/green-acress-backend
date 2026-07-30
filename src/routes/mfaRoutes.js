@@ -3,6 +3,7 @@ import express from "express";
 import {
   configurarMfa,
   confirmarMfa,
+  desactivarMfa,
 } from "../controllers/mfaController.js";
 
 import {
@@ -43,6 +44,30 @@ router.post(
   verificarToken,
   autorizarRoles("ADMIN"),
   confirmarMfa,
+);
+
+
+/* =========================================================
+   DESACTIVAR MFA
+========================================================= */
+
+/*
+  Permite desactivar MFA únicamente a administradores
+  autenticados.
+
+  Requiere confirmación adicional mediante:
+  - contraseña actual;
+  - código TOTP vigente.
+
+  La eliminación de secretos y códigos de recuperación,
+  junto con la auditoría correspondiente, pertenece
+  exclusivamente al service.
+*/
+router.post(
+  "/desactivar",
+  verificarToken,
+  autorizarRoles("ADMIN"),
+  desactivarMfa,
 );
 
 

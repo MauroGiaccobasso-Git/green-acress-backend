@@ -232,7 +232,7 @@ const construirRecoveryUrl = (token) => {
     );
   }
 
-  return `${frontendUrl.replace(/\/$/, "")}/restablecer-password?token=${encodeURIComponent(token)}`;
+  return `${frontendUrl.replace(/\/$/, "")}/resetPassword?token=${encodeURIComponent(token)}`;
 };
 
 /*
@@ -415,6 +415,7 @@ export const loginUsuario = async (email, password) => {
       email: usuario.email,
       rol: usuario.rol,
       estado: usuario.estado,
+      mfaHabilitado: usuario.mfa_habilitado,
     },
   };
 };
@@ -558,6 +559,7 @@ export const verificarMfaLoginUsuario = async (mfaChallengeToken, codigo) => {
       email: usuario.email,
       rol: usuario.rol,
       estado: usuario.estado,
+      mfaHabilitado: usuario.mfa_habilitado,
     },
   };
 };
@@ -678,7 +680,6 @@ export const verificarMfaRecuperacionLoginUsuario = async (
       "MFA_CHALLENGE_ALREADY_USED",
     );
   }
-
   const token = generarTokenSesion(usuario);
 
   return {
@@ -690,6 +691,7 @@ export const verificarMfaRecuperacionLoginUsuario = async (
       email: usuario.email,
       rol: usuario.rol,
       estado: usuario.estado,
+      mfaHabilitado: usuario.mfa_habilitado,
     },
   };
 };
