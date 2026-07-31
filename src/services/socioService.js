@@ -887,6 +887,11 @@ export const cambiarEstadoSocio = async ({
       where: { id: socioExistente.usuario_id },
       data: {
         estado: nuevoEstadoUsuario,
+        ...(estadoSocioValidado === "SUSPENDIDO" && {
+          version_sesion: {
+            increment: 1,
+          },
+        }),
       },
     });
 
