@@ -1,12 +1,19 @@
 import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
 import { validarEmail, validarTelefono } from "../utils/validaciones.js";
+import { registrarAuditoria } from "./auditoriaService.js";
+
+/* =========================================================
+   CONSTANTES DEL MÓDULO
+========================================================= */
+
+const ESTADOS_PROVEEDOR_VALIDOS = ["ACTIVO", "INACTIVO"];
 
 /* =========================================================
    VALIDACIONES GENERALES
 ========================================================= */
 
-// Convierte y valida ID de proveedor.
+// Convierte y valida el identificador del proveedor.
 const validarIdProveedor = (id) => {
   const proveedorId = Number(id);
 
@@ -17,13 +24,81 @@ const validarIdProveedor = (id) => {
   return proveedorId;
 };
 
+// Convierte y valida el identificador del administrador responsable.
+const validarIdUsuario = (id) => {
+  const usuarioId = Number(id);
+
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
+    throw new AppError("El usuario administrador es obligatorio", 400);
+  }
+
+  return usuarioId;
+};
+
+// Valida un estado permitido y devuelve su representación normalizada.
+const validarEstadoProveedor = (estado) => {
+  const estadoNormalizado = String(estado ?? "")
+    .trim()
+    .toUpperCase();
+
+  if (!ESTADOS_PROVEEDOR_VALIDOS.includes(estadoNormalizado)) {
+    throw new AppError("El estado del proveedor no es válido", 400);
+  }
+
+  return estadoNormalizado;
+};
+
+/* =========================================================
+   HELPERS DE NORMALIZACIÓN
+========================================================= */
+
+// Normaliza textos generales sin modificar las mayúsculas elegidas.
+const normalizarTexto = (valor) => {
+  if (typeof valor !== "string") {
+    return "";
+  }
+
+  return valor.trim().replace(/\s+/g, " ");
+};
+
+// Normaliza el email para evitar diferencias por espacios o mayúsculas.
+const normalizarEmail = (valor) => {
+  if (typeof valor !== "string") {
+    return "";
+  }
+
+  return valor.trim().toLowerCase();
+};
+
+// Normaliza el teléfono almacenado como texto.
+const normalizarTelefono = (valor) => {
+  if (typeof valor !== "string") {
+    return "";
+  }
+
+  return valor.trim();
+};
+
+// Normaliza los datos obligatorios utilizados para crear o editar proveedores.
+const normalizarDatosProveedor = ({
+  nombre,
+  contacto,
+  telefono,
+  email,
+} = {}) => ({
+  nombre: normalizarTexto(nombre),
+  contacto: normalizarTexto(contacto),
+  telefono: normalizarTelefono(telefono),
+  email: normalizarEmail(email),
+});
+
 /* =========================================================
    HELPERS DE BÚSQUEDA
 ========================================================= */
 
-// Obtiene proveedor o lanza error si no existe.
-const obtenerProveedorPorId = async (proveedorId) => {
-  const proveedor = await prisma.proveedor.findUnique({
+// Obtiene un proveedor existente o informa que no fue encontrado.
+const obtenerProveedorPorId = async (proveedorId, tx = prisma) => {
+  const proveedor = await tx.proveedor.findUnique({
     where: { id: proveedorId },
   });
 
@@ -35,111 +110,221 @@ const obtenerProveedorPorId = async (proveedorId) => {
 };
 
 /* =========================================================
-   VALIDACIONES DE CAMPOS
+   VALIDACIONES DE DATOS Y NEGOCIO
 ========================================================= */
 
-// Valida campos obligatorios.
-const validarCampoObligatorio = (valor, mensaje) => {
-  if (!valor || valor.trim() === "") {
-    throw new AppError(mensaje, 400);
-  }
-};
-
+// Verifica la presencia de todos los datos requeridos por el proveedor.
 const validarDatosObligatoriosProveedor = ({
   nombre,
   contacto,
   telefono,
   email,
 }) => {
-  validarCampoObligatorio(nombre, "El nombre del proveedor es obligatorio");
-  validarCampoObligatorio(contacto, "El contacto del proveedor es obligatorio");
-  validarCampoObligatorio(telefono, "El teléfono del proveedor es obligatorio");
-  validarCampoObligatorio(email, "El email del proveedor es obligatorio");
+  if (!nombre) {
+    throw new AppError("El nombre del proveedor es obligatorio", 400);
+  }
+
+  if (!contacto) {
+    throw new AppError("El contacto del proveedor es obligatorio", 400);
+  }
+
+  if (!telefono) {
+    throw new AppError("El teléfono del proveedor es obligatorio", 400);
+  }
+
+  if (!email) {
+    throw new AppError("El email del proveedor es obligatorio", 400);
+  }
 };
 
-// Valida formato email/teléfono.
+// Valida los formatos compartidos de teléfono y correo electrónico.
 const validarFormatoProveedor = ({ telefono, email }) => {
   if (!validarTelefono(telefono)) {
-    throw new AppError("El teléfono no es válido", 400);
+    throw new AppError("El teléfono del proveedor no es válido", 400);
   }
 
   if (!validarEmail(email)) {
-    throw new AppError("El email no es válido", 400);
+    throw new AppError("El email del proveedor no es válido", 400);
   }
 };
 
-/* =========================================================
-   VALIDACIONES DE NEGOCIO
-========================================================= */
-
-// Evita duplicados de nombre o email.
+// Impide duplicados por nombre o correo electrónico.
 const validarProveedorDuplicado = async (
-  { nombre, email },
-  proveedorId = null,
+  { nombre, email, proveedorId = null },
+  tx = prisma,
 ) => {
-  const where = {
-    OR: [
-      { nombre: { equals: nombre, mode: "insensitive" } },
-      { email: { equals: email, mode: "insensitive" } },
-    ],
+  const proveedorDuplicado = await tx.proveedor.findFirst({
+    where: {
+      OR: [
+        {
+          nombre: {
+            equals: nombre,
+            mode: "insensitive",
+          },
+        },
+        {
+          email: {
+            equals: email,
+            mode: "insensitive",
+          },
+        },
+      ],
+      NOT: proveedorId ? { id: proveedorId } : undefined,
+    },
+  });
+
+  if (proveedorDuplicado) {
+    throw new AppError(
+      "Ya existe otro proveedor con ese nombre o email",
+      409,
+    );
+  }
+};
+
+// Evita actualizaciones que no modifican ningún dato del proveedor.
+const construirCambiosProveedor = (proveedorExistente, datosNormalizados) => {
+  const cambios = {};
+  const camposModificados = [];
+
+  for (const campo of ["nombre", "contacto", "telefono", "email"]) {
+    if (datosNormalizados[campo] !== proveedorExistente[campo]) {
+      cambios[campo] = datosNormalizados[campo];
+      camposModificados.push(campo);
+    }
+  }
+
+  if (camposModificados.length === 0) {
+    throw new AppError(
+      "No se detectaron cambios para actualizar el proveedor",
+      409,
+    );
+  }
+
+  return {
+    cambios,
+    camposModificados,
   };
-
-  if (proveedorId) {
-    where.NOT = { id: proveedorId };
-  }
-
-  const existe = await prisma.proveedor.findFirst({ where });
-
-  if (existe) {
-    throw new AppError("Ya existe un proveedor con ese nombre o email", 409);
-  }
 };
 
-// Valida estado permitido.
-const validarEstadoProveedor = (estado) => {
-  const estadosPermitidos = ["ACTIVO", "INACTIVO"];
-
-  if (!estadosPermitidos.includes(estado)) {
-    throw new AppError("El estado del proveedor no es válido", 400);
-  }
-};
-
-// Evita updates redundantes de estado.
+// Impide cambios redundantes de estado.
 const validarCambioEstadoProveedor = (estadoActual, nuevoEstado) => {
   if (estadoActual === nuevoEstado) {
-    throw new AppError("El proveedor ya se encuentra en ese estado", 400);
+    throw new AppError(
+      `El proveedor ya se encuentra ${nuevoEstado.toLowerCase()}`,
+      400,
+    );
   }
 };
 
 /* =========================================================
-   TRANSFORMACIÓN DE DATOS
+   HELPERS DE FILTROS
 ========================================================= */
 
-// Normaliza datos antes de persistir.
-const construirDatosProveedor = ({ nombre, contacto, telefono, email }) => ({
-  nombre: nombre.trim(),
-  contacto: contacto.trim(),
-  telefono: telefono.trim(),
-  email: email.trim(),
-});
+// Construye la búsqueda administrativa y el filtro exacto por estado.
+const construirWhereProveedores = ({ search = "", estado } = {}) => {
+  const filtros = [];
+  const searchNormalizado = String(search ?? "").trim();
+
+  if (searchNormalizado) {
+    filtros.push({
+      OR: [
+        {
+          nombre: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          contacto: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          telefono: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          email: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+      ],
+    });
+  }
+
+  if (estado !== undefined && estado !== null && String(estado).trim()) {
+    filtros.push({
+      estado: validarEstadoProveedor(estado),
+    });
+  }
+
+  return filtros.length > 0 ? { AND: filtros } : undefined;
+};
 
 /* =========================================================
-   CRUD PRINCIPAL
+   HELPERS DE AUDITORÍA
 ========================================================= */
 
-export const obtenerProveedores = async (search = "") => {
-  const searchNormalizado = search.trim();
+// Registra la trazabilidad administrativa del alta de un proveedor.
+const auditarCreacionProveedor = async ({ usuarioId, proveedor }, tx) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CREAR_PROVEEDOR",
+      entidad: "Proveedor",
+      entidadId: proveedor.id,
+      detalle: `Proveedor ${proveedor.nombre} creado en estado ${proveedor.estado}.`,
+    },
+    tx,
+  );
+};
 
-  const where = searchNormalizado
-    ? {
-        OR: [
-          { nombre: { contains: searchNormalizado, mode: "insensitive" } },
-          { contacto: { contains: searchNormalizado, mode: "insensitive" } },
-          { telefono: { contains: searchNormalizado, mode: "insensitive" } },
-          { email: { contains: searchNormalizado, mode: "insensitive" } },
-        ],
-      }
-    : {};
+// Registra la trazabilidad administrativa de una modificación.
+const auditarActualizacionProveedor = async (
+  { usuarioId, proveedor, camposModificados },
+  tx,
+) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "ACTUALIZAR_PROVEEDOR",
+      entidad: "Proveedor",
+      entidadId: proveedor.id,
+      detalle:
+        `Proveedor ${proveedor.nombre} actualizado. ` +
+        `Campos modificados: ${camposModificados.join(", ")}.`,
+    },
+    tx,
+  );
+};
+
+// Registra la trazabilidad administrativa de un cambio de estado.
+const auditarCambioEstadoProveedor = async (
+  { usuarioId, proveedor, estadoAnterior },
+  tx,
+) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CAMBIAR_ESTADO_PROVEEDOR",
+      entidad: "Proveedor",
+      entidadId: proveedor.id,
+      detalle: `Proveedor ${proveedor.nombre} cambió de ${estadoAnterior} a ${proveedor.estado}.`,
+    },
+    tx,
+  );
+};
+
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
+========================================================= */
+
+export const obtenerProveedores = async ({ search = "", estado } = {}) => {
+  const where = construirWhereProveedores({ search, estado });
 
   return prisma.proveedor.findMany({
     where,
@@ -147,30 +332,89 @@ export const obtenerProveedores = async (search = "") => {
   });
 };
 
-export const crearProveedor = async (datosProveedor) => {
-  validarDatosObligatoriosProveedor(datosProveedor);
-  validarFormatoProveedor(datosProveedor);
-  await validarProveedorDuplicado(datosProveedor);
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
 
-  const data = construirDatosProveedor(datosProveedor);
+export const crearProveedor = async ({ datosProveedor, usuarioId }) => {
+  const idUsuario = validarIdUsuario(usuarioId);
+  const datosNormalizados = normalizarDatosProveedor(datosProveedor);
 
-  return prisma.proveedor.create({ data });
+  validarDatosObligatoriosProveedor(datosNormalizados);
+  validarFormatoProveedor(datosNormalizados);
+
+  return prisma.$transaction(async (tx) => {
+    await validarProveedorDuplicado(
+      {
+        nombre: datosNormalizados.nombre,
+        email: datosNormalizados.email,
+      },
+      tx,
+    );
+
+    const proveedor = await tx.proveedor.create({
+      data: {
+        ...datosNormalizados,
+        estado: "ACTIVO",
+      },
+    });
+
+    await auditarCreacionProveedor(
+      {
+        usuarioId: idUsuario,
+        proveedor,
+      },
+      tx,
+    );
+
+    return proveedor;
+  });
 };
 
-export const actualizarProveedor = async (id, datosProveedor) => {
-  const proveedorId = validarIdProveedor(id);
+export const actualizarProveedor = async ({
+  proveedorId,
+  datosProveedor,
+  usuarioId,
+}) => {
+  const idProveedor = validarIdProveedor(proveedorId);
+  const idUsuario = validarIdUsuario(usuarioId);
+  const datosNormalizados = normalizarDatosProveedor(datosProveedor);
 
-  await obtenerProveedorPorId(proveedorId);
+  validarDatosObligatoriosProveedor(datosNormalizados);
+  validarFormatoProveedor(datosNormalizados);
 
-  validarDatosObligatoriosProveedor(datosProveedor);
-  validarFormatoProveedor(datosProveedor);
-  await validarProveedorDuplicado(datosProveedor, proveedorId);
+  return prisma.$transaction(async (tx) => {
+    const proveedorExistente = await obtenerProveedorPorId(idProveedor, tx);
 
-  const data = construirDatosProveedor(datosProveedor);
+    await validarProveedorDuplicado(
+      {
+        nombre: datosNormalizados.nombre,
+        email: datosNormalizados.email,
+        proveedorId: idProveedor,
+      },
+      tx,
+    );
 
-  return prisma.proveedor.update({
-    where: { id: proveedorId },
-    data,
+    const { cambios, camposModificados } = construirCambiosProveedor(
+      proveedorExistente,
+      datosNormalizados,
+    );
+
+    const proveedor = await tx.proveedor.update({
+      where: { id: idProveedor },
+      data: cambios,
+    });
+
+    await auditarActualizacionProveedor(
+      {
+        usuarioId: idUsuario,
+        proveedor,
+        camposModificados,
+      },
+      tx,
+    );
+
+    return proveedor;
   });
 };
 
@@ -178,17 +422,34 @@ export const actualizarProveedor = async (id, datosProveedor) => {
    CAMBIO DE ESTADO
 ========================================================= */
 
-export const actualizarEstadoProveedor = async (id, nuevoEstado) => {
-  const proveedorId = validarIdProveedor(id);
+export const actualizarEstadoProveedor = async ({
+  proveedorId,
+  nuevoEstado,
+  usuarioId,
+}) => {
+  const idProveedor = validarIdProveedor(proveedorId);
+  const idUsuario = validarIdUsuario(usuarioId);
+  const estadoValidado = validarEstadoProveedor(nuevoEstado);
 
-  validarEstadoProveedor(nuevoEstado);
+  return prisma.$transaction(async (tx) => {
+    const proveedorExistente = await obtenerProveedorPorId(idProveedor, tx);
 
-  const proveedor = await obtenerProveedorPorId(proveedorId);
+    validarCambioEstadoProveedor(proveedorExistente.estado, estadoValidado);
 
-  validarCambioEstadoProveedor(proveedor.estado, nuevoEstado);
+    const proveedor = await tx.proveedor.update({
+      where: { id: idProveedor },
+      data: { estado: estadoValidado },
+    });
 
-  return prisma.proveedor.update({
-    where: { id: proveedorId },
-    data: { estado: nuevoEstado },
+    await auditarCambioEstadoProveedor(
+      {
+        usuarioId: idUsuario,
+        proveedor,
+        estadoAnterior: proveedorExistente.estado,
+      },
+      tx,
+    );
+
+    return proveedor;
   });
-};
+};  

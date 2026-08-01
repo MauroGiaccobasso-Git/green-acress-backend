@@ -175,13 +175,15 @@ model MovimientoStock {
 model Proveedor {
   id                  Int             @id @default(autoincrement())
   nombre              String
-  contacto            String?
-  telefono            String?
-  email               String?
+  contacto            String
+  telefono            String
+  email               String
   estado              EstadoProveedor @default(ACTIVO)
   fecha_creacion      DateTime        @default(now())
   fecha_actualizacion DateTime        @updatedAt
   compras             Compra[]
+
+  @@index([estado, nombre])
 }
 
 model Compra {
