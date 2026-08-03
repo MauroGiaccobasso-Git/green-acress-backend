@@ -5,6 +5,7 @@ import { generarPasswordRecoveryTemplate } from "./templates/passwordRecoveryTem
 import { generarReservaConfirmadaTemplate } from "./templates/reservaConfirmadaTemplate.js";
 import { generarReservaCanceladaTemplate } from "./templates/reservaCanceladaTemplate.js";
 import { generarReservaVencidaTemplate } from "./templates/reservaVencidaTemplate.js";
+import { generarNovedadPublicadaTemplate } from "./templates/novedadPublicadaTemplate.js";
 
 /* =========================================================
    PASSWORD TEMPORAL
@@ -130,5 +131,31 @@ export const enviarReservaVencida = async ({
     asunto: contenido.subject,
     texto: contenido.text,
     html: contenido.html,
+  });
+};
+
+/* =========================================================
+   NOVEDAD PUBLICADA
+========================================================= */
+
+export const enviarNovedadPublicada = async ({
+  nombre,
+  email,
+  titulo,
+  contenido,
+  fechaPublicacion,
+}) => {
+  const emailContenido = generarNovedadPublicadaTemplate({
+    nombre,
+    titulo,
+    contenido,
+    fechaPublicacion,
+  });
+
+  await enviarEmail({
+    destinatario: email,
+    asunto: emailContenido.subject,
+    texto: emailContenido.text,
+    html: emailContenido.html,
   });
 };
