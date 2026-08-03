@@ -1,74 +1,77 @@
 import prisma from "../config/prisma.js";
 import { AppError } from "../utils/appError.js";
 import {
-  crearNotificacionesMasivas,
+  prepararNotificacionesNovedad,
+  procesarNotificacionesNovedad,
 } from "./notificacionService.js";
-import {
-  registrarAuditoria,
-} from "./auditoriaService.js";
+import { registrarAuditoria } from "./auditoriaService.js";
 
 /* =========================================================
    CONSTANTES DEL MÓDULO
 ========================================================= */
 
-const ESTADOS_NOVEDAD_VALIDOS = [
-  "ACTIVA",
-  "INACTIVA",
-];
-
+const ESTADOS_NOVEDAD_VALIDOS = ["ACTIVA", "INACTIVA"];
 
 /* =========================================================
    SELECTORES SEGUROS
 ========================================================= */
 
-const socioActivoSelect = {
-  id: true,
-  estado: true,
-  usuario: {
-    select: {
-      id: true,
-      estado: true,
-    },
-  },
-};
-
-
-const novedadAdminSelect = {
+const novedadBaseSelect = {
   id: true,
   titulo: true,
   contenido: true,
   estado: true,
   fecha_creacion: true,
   fecha_actualizacion: true,
+};
+
+const novedadAdminSelect = {
+  ...novedadBaseSelect,
   usuario: {
     select: {
       id: true,
       email: true,
     },
   },
+  _count: {
+    select: {
+      notificaciones: true,
+    },
+  },
 };
 
+const novedadPortalSelect = {
+  titulo: true,
+  contenido: true,
+  fecha_creacion: true,
+};
 
 /* =========================================================
    VALIDACIONES GENERALES
 ========================================================= */
 
-const validarIdNovedad = (id) => {
-  const novedadId = Number(id);
+const validarIdPositivo = (valor, nombreCampo) => {
+  const id = Number(valor);
 
-  if (!Number.isInteger(novedadId) || novedadId <= 0) {
+  if (!Number.isInteger(id) || id <= 0) {
     throw new AppError(
-      "El id de la novedad es inválido",
+      `El ${nombreCampo} es inválido`,
       400,
+      "VALIDATION_ERROR",
     );
   }
 
-  return novedadId;
+  return id;
 };
 
+const validarIdNovedad = (id) =>
+  validarIdPositivo(id, "id de la novedad");
+
+const validarIdUsuario = (id) =>
+  validarIdPositivo(id, "id del usuario administrador");
 
 const validarTitulo = (titulo) => {
-  if (!titulo || !titulo.trim()) {
+  if (typeof titulo !== "string" || !titulo.trim()) {
     throw new AppError(
       "El título de la novedad es obligatorio",
       400,
@@ -76,12 +79,11 @@ const validarTitulo = (titulo) => {
     );
   }
 
-  return titulo.trim();
+  return titulo.trim().replace(/\s+/g, " ");
 };
 
-
 const validarContenido = (contenido) => {
-  if (!contenido || !contenido.trim()) {
+  if (typeof contenido !== "string" || !contenido.trim()) {
     throw new AppError(
       "El contenido de la novedad es obligatorio",
       400,
@@ -92,9 +94,12 @@ const validarContenido = (contenido) => {
   return contenido.trim();
 };
 
-
 const validarEstadoNovedad = (estado) => {
-  if (!ESTADOS_NOVEDAD_VALIDOS.includes(estado)) {
+  const estadoNormalizado = String(estado ?? "")
+    .trim()
+    .toUpperCase();
+
+  if (!ESTADOS_NOVEDAD_VALIDOS.includes(estadoNormalizado)) {
     throw new AppError(
       "El estado de novedad indicado no es válido",
       400,
@@ -102,67 +107,98 @@ const validarEstadoNovedad = (estado) => {
     );
   }
 
-  return estado;
+  return estadoNormalizado;
 };
 
+const validarPayload = (payload, nombrePayload) => {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    Array.isArray(payload)
+  ) {
+    throw new AppError(
+      `Los datos para ${nombrePayload} la novedad son inválidos`,
+      400,
+      "VALIDATION_ERROR",
+    );
+  }
 
-/*
-  Valida que el caso de uso reciba únicamente
-  los campos permitidos para crear una novedad.
+  return payload;
+};
 
-  Estado no pertenece al contrato de creación,
-  ya que toda novedad nace ACTIVA.
-*/
-const validarCamposCreacionNovedad = (
-  camposExtra,
-) => {
-
-  const camposInvalidos =
-    Object.keys(camposExtra);
-
+const validarCamposPermitidos = (camposExtra, operacion) => {
+  const camposInvalidos = Object.keys(camposExtra);
 
   if (camposInvalidos.length > 0) {
     throw new AppError(
-      `Los siguientes campos no están permitidos al crear una novedad: ${camposInvalidos.join(", ")}`,
+      `Los siguientes campos no están permitidos al ${operacion} una novedad: ${camposInvalidos.join(", ")}`,
       400,
       "VALIDATION_ERROR",
     );
   }
 };
 
-
 /* =========================================================
-   HELPERS DE BÚSQUEDA
+   HELPERS DE FILTROS
 ========================================================= */
 
-const obtenerSociosActivos = async (
-  tx = prisma,
-) => {
-  return tx.socio.findMany({
-    where: {
-      estado: "ACTIVO",
-      usuario: {
-        estado: "ACTIVO",
-      },
-    },
-    select: socioActivoSelect,
-  });
+const construirWhereNovedades = ({
+  search = "",
+  estado,
+} = {}) => {
+  const filtros = [];
+  const searchNormalizado = String(search ?? "").trim();
+
+  if (searchNormalizado) {
+    filtros.push({
+      OR: [
+        {
+          titulo: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+        {
+          contenido: {
+            contains: searchNormalizado,
+            mode: "insensitive",
+          },
+        },
+      ],
+    });
+  }
+
+  if (
+    estado !== undefined &&
+    estado !== null &&
+    String(estado).trim()
+  ) {
+    filtros.push({
+      estado: validarEstadoNovedad(estado),
+    });
+  }
+
+  return filtros.length > 0
+    ? {
+        AND: filtros,
+      }
+    : undefined;
 };
 
+/* =========================================================
+   HELPERS DE BÚSQUEDA Y TRANSFORMACIÓN
+========================================================= */
 
 const obtenerNovedadExistente = async (
   novedadId,
   tx = prisma,
 ) => {
-
-  const novedad =
-    await tx.novedad.findUnique({
-      where: {
-        id: novedadId,
-      },
-      select: novedadAdminSelect,
-    });
-
+  const novedad = await tx.novedad.findUnique({
+    where: {
+      id: novedadId,
+    },
+    select: novedadAdminSelect,
+  });
 
   if (!novedad) {
     throw new AppError(
@@ -172,25 +208,70 @@ const obtenerNovedadExistente = async (
     );
   }
 
-
   return novedad;
 };
 
+const mapearNovedadAdmin = (novedad) => {
+  const { _count, ...datosNovedad } = novedad;
 
-/* =========================================================
-   VALIDACIONES DE NEGOCIO
-========================================================= */
-
-const validarDatosNovedad = ({
-  titulo,
-  contenido,
-}) => {
-
-  validarTitulo(titulo);
-
-  validarContenido(contenido);
+  return {
+    ...datosNovedad,
+    cantidadNotificaciones:
+      _count?.notificaciones ?? 0,
+  };
 };
 
+const obtenerResumenEntregasNovedad = async (
+  novedadId,
+  tx = prisma,
+) => {
+  const where = {
+    notificacion: {
+      is: {
+        novedad_id: novedadId,
+      },
+    },
+  };
+
+  const [
+    total,
+    pendientes,
+    enviadas,
+    errores,
+  ] = await Promise.all([
+    tx.notificacionEntrega.count({
+      where,
+    }),
+
+    tx.notificacionEntrega.count({
+      where: {
+        ...where,
+        estado: "PENDIENTE",
+      },
+    }),
+
+    tx.notificacionEntrega.count({
+      where: {
+        ...where,
+        estado: "ENVIADA",
+      },
+    }),
+
+    tx.notificacionEntrega.count({
+      where: {
+        ...where,
+        estado: "ERROR",
+      },
+    }),
+  ]);
+
+  return {
+    total,
+    pendientes,
+    enviadas,
+    errores,
+  };
+};
 
 /* =========================================================
    HELPERS DE PERSISTENCIA
@@ -204,7 +285,6 @@ const crearRegistroNovedad = async (
   },
   tx,
 ) => {
-
   return tx.novedad.create({
     data: {
       titulo,
@@ -212,9 +292,9 @@ const crearRegistroNovedad = async (
       estado: "ACTIVA",
       usuario_id: usuarioId,
     },
+    select: novedadBaseSelect,
   });
 };
-
 
 /* =========================================================
    HELPERS DE AUDITORÍA
@@ -223,224 +303,377 @@ const crearRegistroNovedad = async (
 const auditarCreacionNovedad = async (
   {
     usuarioId,
-    novedadId,
-    titulo,
+    novedad,
     cantidadNotificaciones,
   },
   tx,
 ) => {
-
   await registrarAuditoria(
     {
       usuarioId,
       accion: "CREAR_NOVEDAD",
       entidad: "Novedad",
-      entidadId: novedadId,
+      entidadId: novedad.id,
       detalle:
-        `Novedad "${titulo}" creada y publicada. ` +
-        `Se generaron ${cantidadNotificaciones} notificaciones.`,
+        `Novedad "${novedad.titulo}" creada y publicada en estado ACTIVA. ` +
+        `Se generaron ${cantidadNotificaciones} notificaciones por email.`,
     },
     tx,
   );
 };
 
+const auditarCambioEstadoNovedad = async (
+  {
+    usuarioId,
+    novedad,
+    estadoAnterior,
+  },
+  tx,
+) => {
+  await registrarAuditoria(
+    {
+      usuarioId,
+      accion: "CAMBIAR_ESTADO_NOVEDAD",
+      entidad: "Novedad",
+      entidadId: novedad.id,
+      detalle:
+        `Novedad "${novedad.titulo}" cambió de ` +
+        `${estadoAnterior} a ${novedad.estado}.`,
+    },
+    tx,
+  );
+};
+
+/* =========================================================
+   PROCESAMIENTO POSTERIOR AL COMMIT
+========================================================= */
+
+const resumirResultadoEnvios = (resultado) => ({
+  total: resultado.total,
+  enviadas: resultado.enviadas,
+  errores: resultado.errores,
+  estadosNoRegistrados:
+    resultado.estadosNoRegistrados,
+  procesamientoCompleto:
+    resultado.estadosNoRegistrados === 0,
+});
+
+const procesarEnviosLuegoDelCommit = async ({
+  novedad,
+  contextos,
+}) => {
+  try {
+    const resultado =
+      await procesarNotificacionesNovedad({
+        novedad,
+        contextos,
+      });
+
+    return resumirResultadoEnvios(resultado);
+  } catch (error) {
+    /*
+      La publicación ya fue confirmada.
+
+      Un fallo inesperado del proveedor o del procesamiento
+      posterior no debe devolver un error que induzca al
+      administrador a publicar nuevamente la misma novedad.
+    */
+    console.error(
+      `[NOVEDADES] La novedad #${novedad.id} fue publicada, pero ocurrió un error inesperado al procesar sus entregas:`,
+      error,
+    );
+
+    return {
+      total: contextos.length,
+      enviadas: null,
+      errores: null,
+      estadosNoRegistrados: null,
+      procesamientoCompleto: false,
+    };
+  }
+};
 
 /* =========================================================
    CONSULTAS ADMINISTRATIVAS
 ========================================================= */
 
-export const obtenerNovedades = async () => {
-
-  return prisma.novedad.findMany({
-    orderBy: {
-      fecha_creacion: "desc",
-    },
-    select: novedadAdminSelect,
+export const obtenerNovedades = async ({
+  search = "",
+  estado,
+} = {}) => {
+  const where = construirWhereNovedades({
+    search,
+    estado,
   });
-};
 
+  const novedades =
+    await prisma.novedad.findMany({
+      where,
+      orderBy: [
+        {
+          fecha_creacion: "desc",
+        },
+        {
+          id: "desc",
+        },
+      ],
+      select: novedadAdminSelect,
+    });
+
+  return novedades.map(mapearNovedadAdmin);
+};
 
 export const obtenerNovedadPorId = async (
   novedadId,
 ) => {
-
   const idNovedad =
     validarIdNovedad(novedadId);
 
+  const [
+    novedad,
+    resumenEntregas,
+  ] = await Promise.all([
+    obtenerNovedadExistente(idNovedad),
+    obtenerResumenEntregasNovedad(
+      idNovedad,
+    ),
+  ]);
 
-  return obtenerNovedadExistente(
-    idNovedad,
-  );
+  return {
+    ...mapearNovedadAdmin(novedad),
+    resumenEntregas,
+  };
 };
 
-
 /* =========================================================
-   OPERACIONES PRINCIPALES
+   CONSULTAS DEL PORTAL DEL SOCIO
 ========================================================= */
 
+export const obtenerNovedadesActivas =
+  async () => {
+    return prisma.novedad.findMany({
+      where: {
+        estado: "ACTIVA",
+      },
+      orderBy: [
+        {
+          fecha_creacion: "desc",
+        },
+        {
+          id: "desc",
+        },
+      ],
+      select: novedadPortalSelect,
+    });
+  };
+
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
 
 /**
- * Crea una novedad administrativa.
+ * Publica una novedad en estado ACTIVA.
  *
- * Flujo:
+ * La novedad, sus notificaciones, las entregas pendientes
+ * y la auditoría se persisten en una única transacción.
  *
- * Crear Novedad ACTIVA
- *        ↓
- * Buscar socios activos
- *        ↓
- * Generar notificaciones
- *        ↓
- * Registrar auditoría
+ * Los correos se procesan únicamente después del commit.
  */
 export const crearNovedad = async ({
-  titulo,
-  contenido,
+  datosNovedad,
   usuarioId,
-  ...camposExtra
 }) => {
-
-
-  if (!usuarioId) {
-    throw new AppError(
-      "El usuario administrador es obligatorio",
-      400,
-      "VALIDATION_ERROR",
-    );
-  }
-
-
-  validarCamposCreacionNovedad(
-    camposExtra,
+  const payload = validarPayload(
+    datosNovedad,
+    "crear",
   );
 
+  const {
+    titulo,
+    contenido,
+    ...camposExtra
+  } = payload;
+
+  validarCamposPermitidos(
+    camposExtra,
+    "crear",
+  );
+
+  const idUsuario =
+    validarIdUsuario(usuarioId);
 
   const tituloNormalizado =
     validarTitulo(titulo);
 
-
   const contenidoNormalizado =
     validarContenido(contenido);
 
+  const resultadoPersistencia =
+    await prisma.$transaction(
+      async (tx) => {
+        const novedad =
+          await crearRegistroNovedad(
+            {
+              titulo:
+                tituloNormalizado,
+              contenido:
+                contenidoNormalizado,
+              usuarioId: idUsuario,
+            },
+            tx,
+          );
 
+        const contextos =
+          await prepararNotificacionesNovedad(
+            {
+              novedadId: novedad.id,
+              titulo: novedad.titulo,
+            },
+            tx,
+          );
 
-  return prisma.$transaction(async (tx) => {
-
-
-    const novedad =
-      await crearRegistroNovedad(
-        {
-          titulo: tituloNormalizado,
-          contenido: contenidoNormalizado,
-          usuarioId,
-        },
-        tx,
-      );
-
-
-    const sociosActivos =
-      await obtenerSociosActivos(tx);
-
-
-    let notificaciones = [];
-
-
-    if (sociosActivos.length > 0) {
-
-      notificaciones =
-        await crearNotificacionesMasivas(
+        await auditarCreacionNovedad(
           {
-            socios: sociosActivos,
-            novedadId: novedad.id,
-            tipo: "NOVEDAD_PUBLICADA",
-            mensaje: contenidoNormalizado,
-            canal: "EMAIL",
+            usuarioId: idUsuario,
+            novedad,
+            cantidadNotificaciones:
+              contextos.length,
           },
           tx,
         );
-    }
 
+        const novedadPublicada =
+          await obtenerNovedadExistente(
+            novedad.id,
+            tx,
+          );
 
-    await auditarCreacionNovedad(
-      {
-        usuarioId,
-        novedadId: novedad.id,
-        titulo: novedad.titulo,
-        cantidadNotificaciones:
-          notificaciones.length,
+        return {
+          novedad:
+            novedadPublicada,
+          contextos,
+        };
       },
-      tx,
     );
 
+  const resultadoEnvios =
+    await procesarEnviosLuegoDelCommit({
+      novedad:
+        resultadoPersistencia.novedad,
+      contextos:
+        resultadoPersistencia.contextos,
+    });
 
-    return {
-      ...novedad,
-      cantidadNotificaciones:
-        notificaciones.length,
-    };
-  });
+  return {
+    ...mapearNovedadAdmin(
+      resultadoPersistencia.novedad,
+    ),
+    resultadoEnvios,
+  };
 };
 
-
 /**
- * Cambia el estado administrativo de una novedad.
+ * Modifica exclusivamente el estado de una novedad.
+ *
+ * No permite actualizar título, contenido ni solicitar
+ * nuevamente el estado actual.
+ *
+ * El cambio de estado no genera nuevas notificaciones.
  */
 export const cambiarEstadoNovedad = async ({
   novedadId,
-  estado,
+  datosEstado,
   usuarioId,
 }) => {
+  const payload = validarPayload(
+    datosEstado,
+    "actualizar",
+  );
 
+  const {
+    estado,
+    ...camposExtra
+  } = payload;
+
+  validarCamposPermitidos(
+    camposExtra,
+    "actualizar",
+  );
 
   const idNovedad =
     validarIdNovedad(novedadId);
 
+  const idUsuario =
+    validarIdUsuario(usuarioId);
 
-  validarEstadoNovedad(estado);
+  const estadoNormalizado =
+    validarEstadoNovedad(estado);
 
+  return prisma.$transaction(
+    async (tx) => {
+      const novedadExistente =
+        await obtenerNovedadExistente(
+          idNovedad,
+          tx,
+        );
 
-  if (!usuarioId) {
-    throw new AppError(
-      "El usuario responsable es obligatorio",
-      400,
-      "VALIDATION_ERROR",
-    );
-  }
+      if (
+        novedadExistente.estado ===
+        estadoNormalizado
+      ) {
+        throw new AppError(
+          `La novedad ya se encuentra ${estadoNormalizado.toLowerCase()}`,
+          400,
+          "VALIDATION_ERROR",
+        );
+      }
 
+      /*
+        La condición sobre el estado anterior evita que dos
+        cambios concurrentes sobrescriban silenciosamente
+        información desactualizada.
+      */
+      const actualizacion =
+        await tx.novedad.updateMany({
+          where: {
+            id: idNovedad,
+            estado:
+              novedadExistente.estado,
+          },
+          data: {
+            estado:
+              estadoNormalizado,
+          },
+        });
 
-  const novedad =
-    await obtenerNovedadExistente(
-      idNovedad,
-    );
+      if (actualizacion.count !== 1) {
+        throw new AppError(
+          "La novedad fue modificada por otra operación. Actualizá la información e intentá nuevamente",
+          409,
+          "CONFLICT",
+        );
+      }
 
+      const novedadActualizada =
+        await obtenerNovedadExistente(
+          idNovedad,
+          tx,
+        );
 
-  return prisma.$transaction(async (tx) => {
-
-
-    const novedadActualizada =
-      await tx.novedad.update({
-        where: {
-          id: idNovedad,
+      await auditarCambioEstadoNovedad(
+        {
+          usuarioId: idUsuario,
+          novedad:
+            novedadActualizada,
+          estadoAnterior:
+            novedadExistente.estado,
         },
-        data: {
-          estado,
-        },
-        select: novedadAdminSelect,
-      });
+        tx,
+      );
 
-
-    await registrarAuditoria(
-      {
-        usuarioId,
-        accion: "CAMBIAR_ESTADO_NOVEDAD",
-        entidad: "Novedad",
-        entidadId: idNovedad,
-        detalle:
-          `Estado cambiado de ${novedad.estado} a ${estado}.`,
-      },
-      tx,
-    );
-
-
-    return novedadActualizada;
-  });
+      return mapearNovedadAdmin(
+        novedadActualizada,
+      );
+    },
+  );
 };
