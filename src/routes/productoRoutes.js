@@ -15,6 +15,7 @@ import {
   autorizarRoles,
   verificarConsentimientoSocio,
 } from "../middlewares/authMiddleware.js";
+import { recibirImagenProducto } from "../middlewares/productImageUploadMiddleware.js";
 
 const router = express.Router();
 
@@ -69,19 +70,22 @@ router.get(
    OPERACIONES ADMINISTRATIVAS
 ========================================================= */
 
-// Registra un nuevo producto.
+// Registra un nuevo producto y procesa opcionalmente su imagen.
 router.post(
   "/",
   verificarToken,
   autorizarRoles("ADMIN"),
+  recibirImagenProducto,
   crearProductoController,
 );
 
-// Actualiza los datos editables de un producto existente.
+// Actualiza los datos editables de un producto
+// y permite reemplazar opcionalmente su imagen.
 router.put(
   "/:id",
   verificarToken,
   autorizarRoles("ADMIN"),
+  recibirImagenProducto,
   actualizarProductoController,
 );
 

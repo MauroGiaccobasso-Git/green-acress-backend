@@ -8,7 +8,68 @@ import {
   actualizarEstadoProducto,
 } from "../services/productoService.js";
 
+import {
+  eliminarImagenProducto,
+  eliminarImagenProductoPorUrl,
+  subirImagenProducto,
+} from "../services/productImageStorageService.js";
+
 import { asyncHandler } from "../utils/asyncHandler.js";
+
+/* =========================================================
+   HELPERS DE IMÁGENES
+========================================================= */
+
+// Incorpora la URL de la imagen subida a S3 únicamente cuando
+// el formulario incluye un nuevo archivo.
+//
+// También conserva la clave interna para poder compensar
+// la subida si posteriormente falla PostgreSQL.
+const construirDatosProductoConImagen = async (datosProducto, archivo) => {
+  if (!archivo) {
+    return {
+      datosProducto,
+      imagenSubida: null,
+    };
+  }
+
+  const imagenSubida = await subirImagenProducto(archivo);
+
+  return {
+    datosProducto: {
+      ...datosProducto,
+      imagen_url: imagenSubida.url,
+    },
+    imagenSubida,
+  };
+};
+
+// Elimina una imagen recién subida cuando la operación
+// principal del producto no pudo completarse.
+const compensarImagenSubida = async (imagenSubida) => {
+  if (!imagenSubida?.key) {
+    return;
+  }
+
+  await eliminarImagenProducto(imagenSubida.key);
+};
+
+// Después de una actualización exitosa, elimina la imagen anterior
+// únicamente cuando realmente fue reemplazada por una nueva.
+const limpiarImagenAnteriorReemplazada = async ({
+  imagenSubida,
+  imagenAnteriorUrl,
+}) => {
+  if (!imagenSubida || !imagenAnteriorUrl) {
+    return;
+  }
+
+  if (imagenAnteriorUrl === imagenSubida.url) {
+    return;
+  }
+
+  await eliminarImagenProductoPorUrl(imagenAnteriorUrl);
+};
 
 /* =========================================================
    CONSULTAS ADMINISTRATIVAS
@@ -87,31 +148,59 @@ export const getProductosPortalSocioController = asyncHandler(
    OPERACIONES ADMINISTRATIVAS
 ========================================================= */
 
-// Registra un nuevo producto.
+// Registra un nuevo producto y procesa opcionalmente su imagen.
+//
+// Si PostgreSQL rechaza la creación, elimina de S3 la imagen
+// recién subida para evitar archivos abandonados.
 export const crearProductoController = asyncHandler(async (req, res) => {
-  const nuevoProducto = await crearProducto({
-    datosProducto: req.body,
-    usuarioId: req.usuario.id,
-  });
+  const { datosProducto, imagenSubida } =
+    await construirDatosProductoConImagen(req.body, req.file);
 
-  return res.status(201).json({
-    message: "Producto creado correctamente",
-    producto: nuevoProducto,
-  });
+  try {
+    const nuevoProducto = await crearProducto({
+      datosProducto,
+      usuarioId: req.usuario.id,
+    });
+
+    return res.status(201).json({
+      message: "Producto creado correctamente",
+      producto: nuevoProducto,
+    });
+  } catch (error) {
+    await compensarImagenSubida(imagenSubida);
+    throw error;
+  }
 });
 
-// Actualiza los datos editables de un producto existente.
+// Actualiza los datos editables de un producto y permite
+// reemplazar opcionalmente su imagen.
+//
+// Si PostgreSQL falla, elimina la nueva imagen.
+// Si PostgreSQL termina correctamente, elimina la imagen anterior.
 export const actualizarProductoController = asyncHandler(async (req, res) => {
-  const productoActualizado = await actualizarProducto({
-    productoId: req.params.id,
-    datosProducto: req.body,
-    usuarioId: req.usuario.id,
-  });
+  const { datosProducto, imagenSubida } =
+    await construirDatosProductoConImagen(req.body, req.file);
 
-  return res.status(200).json({
-    message: "Producto actualizado correctamente",
-    producto: productoActualizado,
-  });
+  try {
+    const { producto, imagenAnteriorUrl } = await actualizarProducto({
+      productoId: req.params.id,
+      datosProducto,
+      usuarioId: req.usuario.id,
+    });
+
+    await limpiarImagenAnteriorReemplazada({
+      imagenSubida,
+      imagenAnteriorUrl,
+    });
+
+    return res.status(200).json({
+      message: "Producto actualizado correctamente",
+      producto,
+    });
+  } catch (error) {
+    await compensarImagenSubida(imagenSubida);
+    throw error;
+  }
 });
 
 // Modifica el estado lógico de un producto existente.
