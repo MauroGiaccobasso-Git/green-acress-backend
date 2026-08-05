@@ -10,56 +10,84 @@ import {
 } from "../services/reservaService.js";
 
 /* =========================================================
+   HELPERS DE RESPUESTA
+========================================================= */
+
+// Define el mensaje funcional según el resultado automático
+// obtenido luego de procesar la solicitud del socio.
+const obtenerMensajeSolicitudReserva = (estado) => {
+  if (estado === "CONFIRMADA") {
+    return "Reserva confirmada correctamente";
+  }
+
+  if (estado === "RECHAZADA") {
+    return "La reserva fue rechazada porque no cumplió las condiciones requeridas";
+  }
+
+  return "La solicitud de reserva fue registrada correctamente";
+};
+
+/* =========================================================
    CONSULTAS ADMINISTRATIVAS
 ========================================================= */
 
+// Consulta las reservas registradas aplicando los filtros administrativos.
 export const listarReservas = asyncHandler(async (req, res) => {
   const reservas = await getReservas(req.query);
 
-  res.json({
+  return res.status(200).json({
     success: true,
     data: reservas,
   });
 });
 
+// Obtiene el detalle administrativo completo de una reserva.
 export const obtenerReserva = asyncHandler(async (req, res) => {
   const reserva = await getReservaPorId(req.params.id);
 
-  res.json({
+  return res.status(200).json({
     success: true,
     data: reserva,
   });
 });
 
 /* =========================================================
-   CONSULTAS DEL SOCIO
+   CONSULTAS DEL PORTAL DE SOCIOS
 ========================================================= */
 
+// Obtiene únicamente las reservas pertenecientes al socio autenticado.
+// El service separa las reservas activas de su historial personal.
 export const listarMisReservas = asyncHandler(async (req, res) => {
-  const reservas = await getReservasPorUsuarioSocio(req.usuario.id, req.query);
+  const reservas = await getReservasPorUsuarioSocio(
+    req.usuario.id,
+    req.query,
+  );
 
-  res.json({
+  return res.status(200).json({
     success: true,
     data: reservas,
   });
 });
 
+// Obtiene una reserva específica verificando que pertenezca
+// al socio autenticado.
 export const obtenerMiReserva = asyncHandler(async (req, res) => {
   const reserva = await getReservaPorIdUsuarioSocio(
     req.usuario.id,
     req.params.id,
   );
 
-  res.json({
+  return res.status(200).json({
     success: true,
     data: reserva,
   });
 });
 
 /* =========================================================
-   OPERACIONES DEL MÓDULO
+   OPERACIONES DEL PORTAL DE SOCIOS
 ========================================================= */
 
+// Registra y procesa automáticamente una nueva solicitud de reserva.
 export const crearReserva = asyncHandler(async (req, res) => {
   const reserva = await solicitarReserva({
     usuarioId: req.usuario.id,
@@ -67,18 +95,18 @@ export const crearReserva = asyncHandler(async (req, res) => {
     observaciones: req.body.observaciones,
   });
 
-  const message =
-    reserva.estado === "CONFIRMADA"
-      ? "Reserva confirmada correctamente"
-      : "La solicitud de reserva fue registrada y procesada. El resultado final fue RECHAZADA.";
-
-  res.status(201).json({
+  return res.status(201).json({
     success: true,
-    message,
+    message: obtenerMensajeSolicitudReserva(reserva.estado),
     data: reserva,
   });
 });
 
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
+
+// Cancela una reserva confirmada y libera el stock comprometido.
 export const cancelarReservaAdmin = asyncHandler(async (req, res) => {
   const reserva = await cancelarReserva({
     reservaId: req.params.id,
@@ -86,23 +114,24 @@ export const cancelarReservaAdmin = asyncHandler(async (req, res) => {
     observaciones: req.body.observaciones,
   });
 
-  res.json({
+  return res.status(200).json({
     success: true,
     message: "Reserva cancelada correctamente",
     data: reserva,
   });
 });
 
-// Registra el retiro presencial de una reserva previamente confirmada.
-// La operación convierte automáticamente la reserva en una venta,
-// consume el stock reservado y finaliza el ciclo de vida de la reserva.
+// Registra el retiro presencial de una reserva confirmada.
+// La operación la convierte en venta, consume el stock reservado
+// y finaliza su ciclo de vida.
 export const confirmarRetiroReservaAdmin = asyncHandler(async (req, res) => {
   const reserva = await confirmarRetiroReserva({
     reservaId: req.params.id,
     usuarioId: req.usuario.id,
+    observaciones: req.body.observaciones,
   });
 
-  res.json({
+  return res.status(200).json({
     success: true,
     message:
       "Retiro registrado correctamente. La reserva fue convertida en venta.",

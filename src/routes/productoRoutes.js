@@ -1,27 +1,43 @@
-// Importa Express para crear las rutas del módulo
 import express from "express";
 
-// Importa los controladores del módulo de productos
 import {
   getProductosController,
   getOpcionesProductosVentaController,
   getOpcionesProductosCompraController,
+  getProductosPortalSocioController,
   crearProductoController,
   actualizarProductoController,
   actualizarEstadoProductoController,
 } from "../controllers/productoController.js";
 
-// Importa los middlewares de autenticación y autorización
 import {
   verificarToken,
   autorizarRoles,
+  verificarConsentimientoSocio,
 } from "../middlewares/authMiddleware.js";
 
-// Crea una instancia del router de Express
 const router = express.Router();
 
-// Ruta GET para consultar todos los productos registrados.
-// Solo puede acceder un ADMIN autenticado.
+/* =========================================================
+   CONSULTAS DEL PORTAL DE SOCIOS
+========================================================= */
+
+// Consulta las flores disponibles para reserva desde el Portal de Socios.
+// Los socios ACTIVO e INACTIVO pueden consultar el catálogo.
+// Requiere consentimiento informado previamente aceptado.
+router.get(
+  "/disponibles",
+  verificarToken,
+  autorizarRoles("SOCIO"),
+  verificarConsentimientoSocio,
+  getProductosPortalSocioController,
+);
+
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
+========================================================= */
+
+// Consulta productos con búsqueda, filtros y paginación administrativa.
 router.get(
   "/",
   verificarToken,
@@ -29,8 +45,11 @@ router.get(
   getProductosController,
 );
 
-// Ruta GET para obtener las opciones de productos disponibles para Ventas.
-// Devuelve únicamente flores activas, con precio válido y stock disponible.
+/* =========================================================
+   CONSULTAS OPERATIVAS
+========================================================= */
+
+// Obtiene las flores habilitadas para el registro administrativo de ventas.
 router.get(
   "/opciones-venta",
   verificarToken,
@@ -38,8 +57,7 @@ router.get(
   getOpcionesProductosVentaController,
 );
 
-// Ruta GET para obtener las opciones de productos disponibles para Compras.
-// Devuelve únicamente semillas activas requeridas por el formulario de compra.
+// Obtiene las semillas utilizadas por el formulario administrativo de compras.
 router.get(
   "/opciones-compra",
   verificarToken,
@@ -47,8 +65,11 @@ router.get(
   getOpcionesProductosCompraController,
 );
 
-// Ruta protegida para registrar nuevos productos.
-// Solo usuarios ADMIN pueden crear productos.
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
+
+// Registra un nuevo producto.
 router.post(
   "/",
   verificarToken,
@@ -56,8 +77,7 @@ router.post(
   crearProductoController,
 );
 
-// Ruta protegida para actualizar productos existentes.
-// Solo los usuarios con rol ADMIN pueden modificar productos.
+// Actualiza los datos editables de un producto existente.
 router.put(
   "/:id",
   verificarToken,
@@ -65,8 +85,7 @@ router.put(
   actualizarProductoController,
 );
 
-// Ruta protegida para cambiar el estado lógico de un producto.
-// Permite activar o desactivar productos sin eliminarlos físicamente.
+// Modifica el estado lógico de un producto existente.
 router.patch(
   "/:id/estado",
   verificarToken,
@@ -74,5 +93,4 @@ router.patch(
   actualizarEstadoProductoController,
 );
 
-// Exporta el router para utilizarlo en app.js
 export default router;

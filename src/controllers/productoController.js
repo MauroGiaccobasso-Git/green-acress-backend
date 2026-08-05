@@ -2,6 +2,7 @@ import {
   getProductos,
   getOpcionesProductosVenta,
   getOpcionesProductosCompra,
+  getProductosPortalSocio,
   crearProducto,
   actualizarProducto,
   actualizarEstadoProducto,
@@ -9,9 +10,13 @@ import {
 
 import { asyncHandler } from "../utils/asyncHandler.js";
 
-// Obtiene productos registrados permitiendo aplicar búsqueda, filtros y paginación administrativa.
+/* =========================================================
+   CONSULTAS ADMINISTRATIVAS
+========================================================= */
+
+// Obtiene productos registrados permitiendo aplicar búsqueda,
+// filtros y paginación administrativa.
 export const getProductosController = asyncHandler(async (req, res) => {
-  // Obtiene filtros opcionales enviados mediante query params.
   const {
     search = "",
     tipo,
@@ -21,7 +26,6 @@ export const getProductosController = asyncHandler(async (req, res) => {
     limit = 10,
   } = req.query;
 
-  // Consulta productos registrados aplicando búsqueda, filtros y paginación.
   const resultado = await getProductos({
     search,
     tipo,
@@ -34,13 +38,15 @@ export const getProductosController = asyncHandler(async (req, res) => {
   return res.status(200).json(resultado);
 });
 
+/* =========================================================
+   CONSULTAS OPERATIVAS
+========================================================= */
+
 // Obtiene las opciones de productos disponibles para registrar ventas.
 export const getOpcionesProductosVentaController = asyncHandler(
   async (req, res) => {
-    // Consulta únicamente flores activas, con precio válido y stock disponible.
     const productos = await getOpcionesProductosVenta();
 
-    // Retorna las opciones operativas requeridas por el formulario de ventas.
     return res.status(200).json({
       message: "Opciones de productos para ventas obtenidas correctamente",
       productos,
@@ -51,10 +57,8 @@ export const getOpcionesProductosVentaController = asyncHandler(
 // Obtiene las opciones de productos disponibles para registrar compras.
 export const getOpcionesProductosCompraController = asyncHandler(
   async (req, res) => {
-    // Consulta únicamente semillas activas requeridas por el formulario de compras.
     const productos = await getOpcionesProductosCompra();
 
-    // Retorna las opciones operativas requeridas por el formulario de compras.
     return res.status(200).json({
       message: "Opciones de productos para compras obtenidas correctamente",
       productos,
@@ -62,52 +66,63 @@ export const getOpcionesProductosCompraController = asyncHandler(
   },
 );
 
-/**
- * Controller encargado de registrar un nuevo producto.
- */
+/* =========================================================
+   CONSULTAS DEL PORTAL DE SOCIOS
+========================================================= */
+
+// Obtiene el catálogo de flores disponibles para reserva dentro
+// del Portal de Socios, utilizando un contrato público reducido.
+export const getProductosPortalSocioController = asyncHandler(
+  async (req, res) => {
+    const productos = await getProductosPortalSocio();
+
+    return res.status(200).json({
+      message: "Productos disponibles obtenidos correctamente",
+      productos,
+    });
+  },
+);
+
+/* =========================================================
+   OPERACIONES ADMINISTRATIVAS
+========================================================= */
+
+// Registra un nuevo producto.
 export const crearProductoController = asyncHandler(async (req, res) => {
-  // Envía los datos del producto y el usuario autenticado al service.
   const nuevoProducto = await crearProducto({
     datosProducto: req.body,
     usuarioId: req.usuario.id,
   });
 
-  // Retorna respuesta exitosa con el producto creado.
   return res.status(201).json({
     message: "Producto creado correctamente",
     producto: nuevoProducto,
   });
 });
 
-/**
- * Controller encargado de actualizar los datos editables de un producto existente.
- */
+// Actualiza los datos editables de un producto existente.
 export const actualizarProductoController = asyncHandler(async (req, res) => {
-  // Envía el identificador, los datos editables y el usuario autenticado al service.
   const productoActualizado = await actualizarProducto({
     productoId: req.params.id,
     datosProducto: req.body,
     usuarioId: req.usuario.id,
   });
 
-  // Retorna respuesta exitosa con el producto actualizado.
   return res.status(200).json({
     message: "Producto actualizado correctamente",
     producto: productoActualizado,
   });
 });
 
-// Permite modificar el estado lógico de un producto existente.
+// Modifica el estado lógico de un producto existente.
 export const actualizarEstadoProductoController = asyncHandler(
   async (req, res) => {
-    // Envía el identificador, el nuevo estado y el usuario autenticado al service.
     const producto = await actualizarEstadoProducto({
       productoId: req.params.id,
       nuevoEstado: req.body.estado,
       usuarioId: req.usuario.id,
     });
 
-    // Retorna respuesta exitosa con el producto actualizado.
     return res.status(200).json({
       message: "Estado del producto actualizado correctamente",
       producto,
