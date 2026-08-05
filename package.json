@@ -4,6 +4,9 @@
   "description": "Este repositorio contiene el backend del proyecto.  \r Aquí se desarrollará la lógica del servidor, manejo de datos y APIs.",
   "type": "module",
   "main": "index.js",
+  "engines": {
+  "node": ">=22.12.0"
+},
   "scripts": {
   "start": "node src/app.js",
   "dev": "nodemon src/app.js",
