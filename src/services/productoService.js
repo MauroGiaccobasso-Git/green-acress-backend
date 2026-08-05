@@ -64,6 +64,52 @@ const validarPaginacion = (page, limit) => {
   };
 };
 
+// Normaliza los valores recibidos tanto desde JSON como desde formularios
+// multipart/form-data. Los campos numéricos enviados vacíos por FormData
+// se convierten en null para conservar las reglas de negocio existentes.
+const normalizarTexto = (valor) => {
+  if (typeof valor !== "string") {
+    return valor;
+  }
+
+  return valor.trim();
+};
+
+const normalizarTextoOpcional = (valor) => {
+  if (valor === undefined || valor === null) {
+    return valor;
+  }
+
+  if (typeof valor !== "string") {
+    return valor;
+  }
+
+  const textoNormalizado = valor.trim();
+
+  return textoNormalizado || null;
+};
+
+const normalizarNumeroOpcional = (valor) => {
+  if (typeof valor === "string" && !valor.trim()) {
+    return null;
+  }
+
+  return valor;
+};
+
+const normalizarDatosProducto = (datosProducto = {}) => ({
+  ...datosProducto,
+  nombre: normalizarTexto(datosProducto.nombre),
+  descripcion: normalizarTextoOpcional(datosProducto.descripcion),
+  imagen_url: normalizarTextoOpcional(datosProducto.imagen_url),
+  tipo: normalizarTexto(datosProducto.tipo),
+  genetica: normalizarTexto(datosProducto.genetica),
+  porcentaje_thc: normalizarNumeroOpcional(datosProducto.porcentaje_thc),
+  precio_venta_actual: normalizarNumeroOpcional(
+    datosProducto.precio_venta_actual,
+  ),
+});
+
 // Valida que el estado solicitado sea permitido
 // y que no coincida con el estado actual.
 const validarCambioEstadoProducto = (productoExistente, nuevoEstado) => {
@@ -673,17 +719,18 @@ export const getProductosPortalSocio = async () => {
 
 export const crearProducto = async ({ datosProducto, usuarioId }) => {
   const idUsuario = validarIdUsuario(usuarioId);
+  const datosNormalizados = normalizarDatosProducto(datosProducto);
 
   return prisma.$transaction(async (tx) => {
     await validarNombreProducto(
       {
-        nombre: datosProducto.nombre,
+        nombre: datosNormalizados.nombre,
         obligatorio: true,
       },
       tx,
     );
 
-    const datosCreacion = construirDatosCreacionProducto(datosProducto);
+    const datosCreacion = construirDatosCreacionProducto(datosNormalizados);
 
     const producto = await crearProductoPersistencia(datosCreacion, tx);
 
@@ -706,22 +753,23 @@ export const actualizarProducto = async ({
 }) => {
   const idProducto = validarIdProducto(productoId);
   const idUsuario = validarIdUsuario(usuarioId);
+  const datosNormalizados = normalizarDatosProducto(datosProducto);
 
   return prisma.$transaction(async (tx) => {
     const productoExistente = await obtenerProductoPorId(idProducto, tx);
 
-    validarTipoInmutable(datosProducto.tipo, productoExistente);
+    validarTipoInmutable(datosNormalizados.tipo, productoExistente);
 
     await validarNombreProducto(
       {
-        nombre: datosProducto.nombre,
+        nombre: datosNormalizados.nombre,
         productoId: idProducto,
       },
       tx,
     );
 
     const datosActualizacion = construirDatosActualizacionProducto(
-      datosProducto,
+      datosNormalizados,
       productoExistente,
     );
 
@@ -739,7 +787,10 @@ export const actualizarProducto = async ({
       tx,
     );
 
-    return producto;
+    return {
+      producto,
+      imagenAnteriorUrl: productoExistente.imagen_url,
+    };
   });
 };
 
