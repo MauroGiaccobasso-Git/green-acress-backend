@@ -221,6 +221,69 @@ const normalizarDatosActualizacionSocio = (datosSocio = {}) => {
 };
 
 /* =========================================================
+   CONTROL DE CONCURRENCIA DEL DOMINIO SOCIOS
+========================================================= */
+
+/*
+  Bloquea la fila del socio mediante SELECT ... FOR UPDATE
+  dentro de la transacción activa.
+
+  ¿Qué carreras evita?
+
+  - dos cambios de estado simultáneos;
+  - una venta o reserva iniciada mientras el socio es suspendido;
+  - una reserva iniciada mientras el socio pasa a INACTIVO;
+  - dos aceptaciones simultáneas del consentimiento informado.
+
+  Con el bloqueo:
+
+  1. la primera operación obtiene la fila del socio;
+  2. las demás operaciones sobre ese mismo socio esperan;
+  3. después del bloqueo se vuelve a leer el estado actual;
+  4. cada validación se ejecuta con información confirmada.
+
+  El bloqueo es individual por socio. Operaciones de socios
+  distintos pueden continuar en paralelo.
+
+  La fila se libera automáticamente al confirmar o revertir
+  la transacción.
+*/
+const bloquearSocioParaOperacion = async (socioId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Socio"
+    WHERE id = ${socioId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("El socio indicado no existe", 404);
+  }
+};
+
+/*
+  Bloquea el socio asociado al usuario autenticado.
+
+  Se utiliza en operaciones iniciadas desde el Portal de Socios,
+  donde el servicio recibe usuario_id y todavía no conoce socio_id.
+*/
+const bloquearSocioPorUsuario = async (usuarioId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Socio"
+    WHERE usuario_id = ${usuarioId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError(
+      "No existe un socio asociado al usuario autenticado",
+      404,
+    );
+  }
+};
+
+/* =========================================================
    HELPERS DE BÚSQUEDA
 ========================================================= */
 
@@ -874,6 +937,24 @@ export const cambiarEstadoSocio = async ({
   const motivoNormalizado = validarMotivoCambioEstado(motivo);
 
   const resultado = await prisma.$transaction(async (tx) => {
+    /*
+      CONCURRENCIA — CAMBIO DE ESTADO
+
+      El socio se bloquea antes de leer y validar su estado.
+
+      Esto mantiene sincronizados:
+
+      - estado funcional del Socio;
+      - acceso del Usuario;
+      - reservas activas;
+      - nuevas ventas y reservas.
+
+      Ventas y reservas utilizan el mismo bloqueo por socio,
+      por lo que ninguna puede continuar con un estado anterior
+      a esta transición administrativa.
+    */
+    await bloquearSocioParaOperacion(idSocio, tx);
+
     const socioExistente = await obtenerSocioPorId(idSocio, tx);
 
     validarCambioEstadoSocio(socioExistente, estadoSocioValidado);
@@ -982,6 +1063,17 @@ export const aceptarConsentimiento = async (usuarioId) => {
   const idUsuario = validarIdUsuario(usuarioId);
 
   return prisma.$transaction(async (tx) => {
+    /*
+      CONCURRENCIA — CONSENTIMIENTO INFORMADO
+
+      Dos solicitudes simultáneas no deben registrar dos veces
+      la aceptación ni generar auditorías duplicadas.
+
+      Se bloquea primero la fila asociada al usuario y luego se
+      vuelve a leer el consentimiento confirmado más reciente.
+    */
+    await bloquearSocioPorUsuario(idUsuario, tx);
+
     const socio = await obtenerSocioPorUsuarioId(idUsuario, tx);
 
     if (socio.consentimiento_aceptado) {

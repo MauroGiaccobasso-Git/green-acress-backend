@@ -262,26 +262,87 @@ export const calcularConsumoMensualSocio = async (
 };
 
 /* =========================================================
-   VALIDACIÓN DE LÍMITE LEGAL
+   CONTROL DE CONCURRENCIA DEL LÍMITE LEGAL
 ========================================================= */
 
-export const validarLimiteLegalMensual = async ({
+/*
+  Bloquea la fila del socio mediante SELECT ... FOR UPDATE
+  dentro de la misma transacción que registrará la reserva o venta.
+
+  ¿Qué carrera evita?
+
+  Sin este bloqueo, dos operaciones simultáneas del mismo socio
+  podrían leer el mismo consumo mensual y aprobarse por separado.
+
+  Ejemplo:
+  - el socio lleva 35 g;
+  - una venta solicita 5 g;
+  - una reserva solicita 5 g al mismo tiempo.
+
+  Ambas podrían calcular 35 + 5 = 40 y aprobarse, dejando un
+  consumo real de 45 g.
+
+  Con el bloqueo:
+  - la primera operación obtiene la fila del socio;
+  - la segunda espera;
+  - la primera valida y registra su operación;
+  - la segunda vuelve a calcular el consumo actualizado;
+  - la segunda se rechaza si supera los 40 g.
+
+  El bloqueo se aplica por socio, no sobre toda la tabla.
+  Operaciones de socios distintos pueden continuar en paralelo.
+
+  La fila se libera automáticamente al confirmar o revertir
+  la transacción.
+*/
+const bloquearSocioParaValidacionLegal = async (socioId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Socio"
+    WHERE id = ${socioId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("El socio indicado no existe", 404);
+  }
+};
+
+/*
+  Ejecuta la validación legal dentro de una transacción activa.
+
+  El orden es intencional y debe conservarse:
+
+  bloquear socio
+  → recalcular consumo mensual
+  → proyectar nueva operación
+  → validar límite
+
+  Las operaciones que además modifican stock deben mantener
+  este orden global:
+
+  socio
+  → stock de productos
+
+  Así evitamos que ventas y reservas adquieran bloqueos
+  incompatibles en órdenes distintos.
+*/
+const validarLimiteLegalMensualEnTransaccion = async ({
   socioId,
   gramosNuevaOperacion,
-  fechaReferencia = new Date(),
-  tx = prisma,
+  fechaReferencia,
+  tx,
 }) => {
-  const idSocio = validarIdSocio(socioId);
-  const gramosOperacion = validarGramosOperacion(gramosNuevaOperacion);
+  await bloquearSocioParaValidacionLegal(socioId, tx);
 
   const consumoMensual = await calcularConsumoMensualSocio(
-    idSocio,
+    socioId,
     fechaReferencia,
     tx,
   );
 
   const totalProyectado =
-    consumoMensual.gramosConsumidos + gramosOperacion;
+    consumoMensual.gramosConsumidos + gramosNuevaOperacion;
 
   if (totalProyectado > LIMITE_LEGAL_MENSUAL_GRAMOS) {
     throw new AppError(
@@ -292,9 +353,48 @@ export const validarLimiteLegalMensual = async ({
 
   return {
     ...consumoMensual,
-    gramosNuevaOperacion: gramosOperacion,
+    gramosNuevaOperacion,
     totalProyectado,
     gramosDisponiblesLuego:
       LIMITE_LEGAL_MENSUAL_GRAMOS - totalProyectado,
   };
+};
+
+/* =========================================================
+   VALIDACIÓN DE LÍMITE LEGAL
+========================================================= */
+
+export const validarLimiteLegalMensual = async ({
+  socioId,
+  gramosNuevaOperacion,
+  fechaReferencia = new Date(),
+  tx = null,
+}) => {
+  const idSocio = validarIdSocio(socioId);
+  const gramosOperacion = validarGramosOperacion(gramosNuevaOperacion);
+  const fecha = validarFechaReferencia(fechaReferencia);
+
+  /*
+    Las operaciones productivas ya entregan su cliente transaccional.
+
+    El fallback crea una transacción propia para que una llamada directa
+    tampoco ejecute SELECT ... FOR UPDATE fuera de una transacción útil.
+  */
+  if (!tx) {
+    return prisma.$transaction((transaction) =>
+      validarLimiteLegalMensualEnTransaccion({
+        socioId: idSocio,
+        gramosNuevaOperacion: gramosOperacion,
+        fechaReferencia: fecha,
+        tx: transaction,
+      }),
+    );
+  }
+
+  return validarLimiteLegalMensualEnTransaccion({
+    socioId: idSocio,
+    gramosNuevaOperacion: gramosOperacion,
+    fechaReferencia: fecha,
+    tx,
+  });
 };

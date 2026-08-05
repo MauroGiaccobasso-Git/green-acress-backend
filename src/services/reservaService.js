@@ -371,6 +371,130 @@ const obtenerSocioDesdeUsuario = async (usuarioId, tx = prisma) => {
   };
 };
 
+/* =========================================================
+   CONTROL DE CONCURRENCIA DEL DOMINIO RESERVAS
+========================================================= */
+
+/*
+  Bloquea la fila del socio durante la solicitud de una reserva.
+
+  ¿Qué carrera evita?
+
+  Una suspensión administrativa podría ejecutarse al mismo tiempo
+  que el socio solicita una reserva.
+
+  Sin el bloqueo, la solicitud podría:
+
+  1. leer al socio como ACTIVO;
+  2. la suspensión cambiarlo a SUSPENDIDO;
+  3. la reserva continuar y quedar CONFIRMADA igualmente.
+
+  Con el bloqueo:
+
+  - la solicitud y el cambio de estado se serializan por socio;
+  - después de obtener el bloqueo se vuelve a leer su estado;
+  - ninguna reserva puede confirmarse usando información anterior.
+
+  Este bloqueo también establece el orden global del módulo:
+
+  socio
+  → stock de productos
+
+  La fila se libera automáticamente al confirmar o revertir
+  la transacción.
+*/
+const bloquearSocioParaReserva = async (socioId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Socio"
+    WHERE id = ${socioId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("El socio indicado no existe", 404);
+  }
+};
+
+/*
+  Bloquea las filas de Stock involucradas antes de validar
+  disponibilidad y confirmar la reserva.
+
+  Los identificadores se ordenan siempre de menor a mayor.
+
+  ¿Por qué es importante el orden?
+
+  Dos reservas con varios productos podrían solicitar las mismas
+  filas en órdenes distintos y generar un deadlock.
+
+  Ordenarlas garantiza que todas las operaciones adquieran
+  los bloqueos de inventario con el mismo criterio.
+
+  Si un producto todavía no posee fila de stock, no se lanza
+  el error aquí. La validación funcional posterior se encarga
+  de rechazar la reserva con el mensaje correspondiente.
+*/
+const bloquearStocksParaReserva = async (productosIds, tx) => {
+  const productosOrdenados = [...new Set(productosIds)].sort(
+    (productoA, productoB) => productoA - productoB,
+  );
+
+  for (const productoId of productosOrdenados) {
+    await tx.$queryRaw`
+      SELECT id
+      FROM "Stock"
+      WHERE producto_id = ${productoId}
+      FOR UPDATE
+    `;
+  }
+};
+
+/*
+  Bloquea una reserva antes de cualquier transición de estado.
+
+  Protege las competencias entre:
+
+  - retiro;
+  - cancelación;
+  - vencimiento;
+  - suspensión del socio.
+
+  La operación que obtiene primero el bloqueo modifica la reserva.
+  Las demás esperan, vuelven a leer el estado actual y ya no pueden
+  aplicar una segunda transición incompatible.
+*/
+const bloquearReservaParaCambioEstado = async (reservaId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Reserva"
+    WHERE id = ${reservaId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("La reserva indicada no existe", 404);
+  }
+};
+
+/*
+  Devuelve una copia ordenada de los detalles para que toda
+  operación que adquiera varios bloqueos de stock utilice
+  siempre el mismo orden por producto.
+*/
+const ordenarDetallesPorProducto = (detalles) => {
+  return [...detalles].sort((detalleA, detalleB) => {
+    const productoA = Number(
+      detalleA.productoId ?? detalleA.producto_id,
+    );
+
+    const productoB = Number(
+      detalleB.productoId ?? detalleB.producto_id,
+    );
+
+    return productoA - productoB;
+  });
+};
+
 const obtenerProductosPorIds = async (productosIds, tx = prisma) => {
   const productos = await tx.producto.findMany({
     where: {
@@ -402,6 +526,12 @@ const obtenerReservaCompletaPorId = async (reservaId, tx = prisma) => {
 };
 
 const obtenerReservaParaCambioEstado = async (reservaId, tx = prisma) => {
+  await bloquearReservaParaCambioEstado(reservaId, tx);
+
+  /*
+    La lectura ocurre después del FOR UPDATE para trabajar siempre
+    con el estado confirmado más reciente dentro de la transacción.
+  */
   const reserva = await tx.reserva.findUnique({
     where: { id: reservaId },
     include: {
@@ -901,8 +1031,11 @@ const crearVentaDesdeReserva = async (
 };
 
 // Finaliza la reserva y la vincula con la venta generada.
-// El update condicional evita que dos solicitudes concurrentes
-// puedan convertir la misma reserva más de una vez.
+//
+// La fila ya se encuentra bloqueada mediante SELECT ... FOR UPDATE.
+// El update condicional se conserva como defensa adicional para impedir
+// que una reserva sea convertida más de una vez incluso si este helper
+// fuera reutilizado incorrectamente en el futuro.
 const finalizarReservaConVenta = async ({ reservaId, ventaId }, tx) => {
   const resultado = await tx.reserva.updateMany({
     where: {
@@ -958,7 +1091,11 @@ const validarProcesamientoReserva = async ({
 };
 
 const bloquearStockReserva = async (detallesCalculados, reservaId, tx) => {
-  for (const detalle of detallesCalculados) {
+  const detallesOrdenados = ordenarDetallesPorProducto(
+    detallesCalculados,
+  );
+
+  for (const detalle of detallesOrdenados) {
     await reservarStock(
       {
         productoId: detalle.productoId,
@@ -990,7 +1127,11 @@ const liberarStockReserva = async (
   motivoLiberacion,
   tx,
 ) => {
-  for (const detalle of detallesReserva) {
+  const detallesOrdenados = ordenarDetallesPorProducto(
+    detallesReserva,
+  );
+
+  for (const detalle of detallesOrdenados) {
     await liberarStockReservado(
       {
         productoId: detalle.producto_id,
@@ -1008,7 +1149,11 @@ const liberarStockReserva = async (
 // Consume el stock previamente reservado cuando se registra el retiro.
 // El movimiento queda asociado a la Venta porque representa una salida física.
 const consumirStockReservaRetirada = async (detallesReserva, ventaId, tx) => {
-  for (const detalle of detallesReserva) {
+  const detallesOrdenados = ordenarDetallesPorProducto(
+    detallesReserva,
+  );
+
+  for (const detalle of detallesOrdenados) {
     await consumirStockReservado(
       {
         productoId: detalle.producto_id,
@@ -1261,7 +1406,18 @@ export const solicitarReserva = async ({
   const detallesNormalizados = validarDetallesReserva(detalles);
 
   const reservaProcesada = await prisma.$transaction(async (tx) => {
-    const contextoSocio = await obtenerSocioDesdeUsuario(idUsuario, tx);
+    /*
+      Primero se identifica al socio, luego se bloquea su fila
+      y finalmente se vuelve a leer su estado.
+
+      Esta segunda lectura es obligatoria: evita confirmar una
+      reserva con un estado anterior a una suspensión concurrente.
+    */
+    let contextoSocio = await obtenerSocioDesdeUsuario(idUsuario, tx);
+
+    await bloquearSocioParaReserva(contextoSocio.socio.id, tx);
+
+    contextoSocio = await obtenerSocioDesdeUsuario(idUsuario, tx);
 
     validarAccesoPortalSocio(contextoSocio);
     validarSocioActivo(contextoSocio.socio);
@@ -1271,6 +1427,16 @@ export const solicitarReserva = async ({
     const productosIds = detallesNormalizados.map(
       (detalle) => detalle.productoId,
     );
+
+    /*
+      El socio ya está bloqueado. A continuación se bloquean
+      todos los stocks en orden determinista y recién después
+      se leen sus cantidades.
+
+      Así, disponibilidad, validación y confirmación utilizan
+      valores estables dentro de la misma transacción.
+    */
+    await bloquearStocksParaReserva(productosIds, tx);
 
     const productos = await obtenerProductosPorIds(productosIds, tx);
 
@@ -1444,22 +1610,47 @@ export const cancelarReservasActivasPorSocio = async (
   }
 
   const operacion = async (tx) => {
-    const reservasActivas = await tx.reserva.findMany({
+    /*
+      La suspensión bloquea primero al socio.
+
+      Esto impide que una nueva solicitud de reserva se confirme
+      mientras se están resolviendo sus reservas activas.
+    */
+    await bloquearSocioParaReserva(idSocio, tx);
+
+    const reservasCandidatas = await tx.reserva.findMany({
       where: {
         socio_id: idSocio,
         estado: {
           in: ["PENDIENTE", "CONFIRMADA"],
         },
       },
-      include: {
-        detalles: true,
+      select: {
+        id: true,
       },
       orderBy: {
-        fecha_solicitud: "asc",
+        id: "asc",
       },
     });
 
-    for (const reserva of reservasActivas) {
+    const reservasCanceladas = [];
+
+    /*
+      Cada reserva se bloquea y se vuelve a leer.
+
+      Si otra operación la finalizó, canceló o venció antes,
+      se omite de forma segura y no se libera stock dos veces.
+    */
+    for (const candidata of reservasCandidatas) {
+      const reserva = await obtenerReservaParaCambioEstado(
+        candidata.id,
+        tx,
+      );
+
+      if (!["PENDIENTE", "CONFIRMADA"].includes(reserva.estado)) {
+        continue;
+      }
+
       const liberaStock = reserva.estado === "CONFIRMADA";
 
       await cancelarReservaInterna(
@@ -1476,12 +1667,14 @@ export const cancelarReservasActivasPorSocio = async (
         },
         tx,
       );
+
+      reservasCanceladas.push(reserva);
     }
 
     return {
-      cantidadCancelada: reservasActivas.length,
-      reservasIds: reservasActivas.map((reserva) => reserva.id),
-      reservasParaNotificar: reservasActivas.map((reserva) => ({
+      cantidadCancelada: reservasCanceladas.length,
+      reservasIds: reservasCanceladas.map((reserva) => reserva.id),
+      reservasParaNotificar: reservasCanceladas.map((reserva) => ({
         socioId: idSocio,
         reservaId: reserva.id,
         motivo: motivoNormalizado,
@@ -1560,22 +1753,57 @@ export const cancelarReserva = async ({
 export const vencerReservasExpiradas = async () => {
   const ahora = new Date();
 
-  const reservasVencidas = await prisma.reserva.findMany({
+  /*
+    La consulta inicial obtiene únicamente candidatos.
+
+    No se confía en su estado para modificar datos, porque entre
+    esta lectura y el procesamiento una reserva podría ser retirada
+    o cancelada por otra solicitud.
+  */
+  const reservasCandidatas = await prisma.reserva.findMany({
     where: {
       estado: "CONFIRMADA",
       fecha_limite_retiro: {
         lt: ahora,
       },
     },
-    include: {
-      detalles: true,
+    select: {
+      id: true,
+    },
+    orderBy: {
+      id: "asc",
     },
   });
 
   const resultados = [];
 
-  for (const reserva of reservasVencidas) {
+  for (const candidata of reservasCandidatas) {
     const reservaProcesada = await prisma.$transaction(async (tx) => {
+      /*
+        El FOR UPDATE serializa vencimiento, cancelación y retiro.
+
+        Después del bloqueo se vuelve a validar estado y fecha.
+        Si otra operación ya resolvió la reserva, este job la omite
+        y no toca nuevamente el stock.
+      */
+      const reserva = await obtenerReservaParaCambioEstado(
+        candidata.id,
+        tx,
+      );
+
+      const fechaLimiteRetiro = reserva.fecha_limite_retiro
+        ? new Date(reserva.fecha_limite_retiro)
+        : null;
+
+      const sigueVencida =
+        reserva.estado === "CONFIRMADA" &&
+        fechaLimiteRetiro !== null &&
+        fechaLimiteRetiro < ahora;
+
+      if (!sigueVencida) {
+        return null;
+      }
+
       await liberarStockReserva(
         reserva.detalles,
         reserva.id,
@@ -1617,6 +1845,10 @@ export const vencerReservasExpiradas = async () => {
 
       return obtenerReservaCompletaPorId(reserva.id, tx);
     });
+
+    if (!reservaProcesada) {
+      continue;
+    }
 
     await notificarReservaVencida({
       socioId: reservaProcesada.socio_id,
