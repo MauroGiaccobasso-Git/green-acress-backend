@@ -157,6 +157,124 @@ const validarDetallesVenta = (detalles) => {
 };
 
 /* =========================================================
+   CONTROL DE CONCURRENCIA DEL DOMINIO VENTAS
+========================================================= */
+
+/*
+  Bloquea la fila del socio antes de validar su estado y su
+  límite legal mensual.
+
+  ¿Qué carrera evita?
+
+  Dos ventas simultáneas, o una venta y una reserva del mismo socio,
+  podrían leer el mismo consumo mensual y aprobarse por separado.
+
+  También evita registrar una venta utilizando un estado anterior
+  mientras otro proceso suspende al socio.
+
+  El orden global que debe respetarse es:
+
+  socio
+  → stock de productos
+
+  La fila se libera automáticamente al confirmar o revertir
+  la transacción.
+*/
+const bloquearSocioParaVenta = async (socioId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Socio"
+    WHERE id = ${socioId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("El socio indicado no existe", 404);
+  }
+};
+
+/*
+  Bloquea las filas de Stock involucradas en una venta directa.
+
+  Los identificadores se ordenan siempre de menor a mayor para que
+  ventas, reservas y demás operaciones adquieran varios bloqueos
+  de inventario con el mismo criterio.
+
+  Esto evita deadlocks cuando dos operaciones compiten por más de
+  un producto en órdenes diferentes.
+
+  La validación y el descuento definitivo continúan delegados a
+  stockService, que vuelve a leer los valores actuales bajo bloqueo.
+*/
+const bloquearStocksParaVenta = async (productosIds, tx) => {
+  const productosOrdenados = [...new Set(productosIds)].sort(
+    (productoA, productoB) => productoA - productoB,
+  );
+
+  for (const productoId of productosOrdenados) {
+    const filasBloqueadas = await tx.$queryRaw`
+      SELECT id
+      FROM "Stock"
+      WHERE producto_id = ${productoId}
+      FOR UPDATE
+    `;
+
+    if (filasBloqueadas.length === 0) {
+      throw new AppError("El producto no tiene stock asociado", 404);
+    }
+  }
+};
+
+/*
+  Bloquea una venta antes de validar y ejecutar su anulación.
+
+  ¿Qué carrera evita?
+
+  Dos solicitudes de anulación simultáneas podrían leer la venta
+  como REGISTRADA y restituir el mismo stock dos veces.
+
+  Con SELECT ... FOR UPDATE:
+
+  - la primera solicitud obtiene la fila;
+  - la segunda espera;
+  - al continuar, vuelve a leer el estado ANULADA;
+  - la segunda anulación se rechaza sin tocar nuevamente el stock.
+*/
+const bloquearVentaParaAnulacion = async (ventaId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Venta"
+    WHERE id = ${ventaId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("La venta indicada no existe", 404);
+  }
+};
+
+/*
+  Devuelve una copia ordenada de los detalles.
+
+  Toda operación que modifique stock de varios productos utiliza
+  este helper para conservar un orden único de adquisición
+  de bloqueos y reducir el riesgo de deadlocks.
+*/
+const ordenarDetallesPorProducto = (detalles) => {
+  return [...detalles].sort((detalleA, detalleB) => {
+    const productoA = Number(
+      detalleA.productoId ?? detalleA.producto_id,
+    );
+
+    const productoB = Number(
+      detalleB.productoId ?? detalleB.producto_id,
+    );
+
+    return productoA - productoB;
+  });
+};
+
+/* =========================================================
    HELPERS DE BÚSQUEDA
 ========================================================= */
 
@@ -204,6 +322,12 @@ const obtenerVentaCompletaPorId = async (ventaId, tx = prisma) => {
 
 // Busca una venta con sus datos necesarios para anulación.
 const obtenerVentaParaAnulacion = async (ventaId, tx = prisma) => {
+  await bloquearVentaParaAnulacion(ventaId, tx);
+
+  /*
+    La lectura ocurre después del bloqueo para validar siempre
+    el estado confirmado más reciente dentro de la transacción.
+  */
   const venta = await tx.venta.findUnique({
     where: { id: ventaId },
     include: {
@@ -444,7 +568,11 @@ const crearVentaConDetalles = async (
 
 // Descuenta stock físico por cada producto vendido.
 const descontarStockVenta = async (detallesCalculados, ventaId, tx) => {
-  for (const detalle of detallesCalculados) {
+  const detallesOrdenados = ordenarDetallesPorProducto(
+    detallesCalculados,
+  );
+
+  for (const detalle of detallesOrdenados) {
     await descontarStock(
       {
         productoId: detalle.productoId,
@@ -459,7 +587,9 @@ const descontarStockVenta = async (detallesCalculados, ventaId, tx) => {
 
 // Restituye stock físico cuando una venta registrada es anulada.
 const restituirStockVentaAnulada = async (detallesVenta, ventaId, tx) => {
-  for (const detalle of detallesVenta) {
+  const detallesOrdenados = ordenarDetallesPorProducto(detallesVenta);
+
+  for (const detalle of detallesOrdenados) {
     await incrementarStock(
       {
         productoId: detalle.producto_id,
@@ -536,6 +666,14 @@ export const registrarVenta = async ({
   const detallesNormalizados = validarDetallesVenta(detalles);
 
   return prisma.$transaction(async (tx) => {
+    /*
+      La fila del socio se bloquea antes de cualquier validación.
+
+      Luego se vuelve a leer su estado para no registrar una venta
+      utilizando información anterior a una suspensión concurrente.
+    */
+    await bloquearSocioParaVenta(idSocio, tx);
+
     const socio = await obtenerSocioPorId(idSocio, tx);
     validarSocioActivo(socio);
 
@@ -551,11 +689,27 @@ export const registrarVenta = async ({
 
     const gramosVenta = calcularGramosVenta(detallesCalculados);
 
+    /*
+      limiteLegalService vuelve a utilizar el mismo bloqueo del socio
+      dentro de esta transacción y recalcula el consumo mensual real.
+
+      Así, una venta y una reserva simultáneas del mismo socio no pueden
+      aprobarse sobre el mismo consumo anterior.
+    */
     await validarLimiteLegalMensual({
       socioId: idSocio,
       gramosNuevaOperacion: gramosVenta,
       tx,
     });
+
+    /*
+      Después del socio se bloquean todos los stocks en orden estable.
+
+      La venta mantiene esos bloqueos hasta terminar, por lo que ninguna
+      reserva, compra, ajuste u otra venta puede consumir los mismos
+      valores de inventario en paralelo.
+    */
+    await bloquearStocksParaVenta(productosIds, tx);
 
     const totalVenta = calcularTotalVenta(detallesCalculados);
 
@@ -596,12 +750,28 @@ export const anularVenta = async ({ ventaId, usuarioId }) => {
 
     validarVentaAnulable(venta);
 
-    await tx.venta.update({
-      where: { id: idVenta },
+    /*
+      La fila ya está protegida con SELECT ... FOR UPDATE.
+
+      El update condicional se conserva como segunda defensa:
+      solamente una venta que siga REGISTRADA puede pasar a ANULADA.
+    */
+    const resultadoAnulacion = await tx.venta.updateMany({
+      where: {
+        id: idVenta,
+        estado: "REGISTRADA",
+      },
       data: {
         estado: "ANULADA",
       },
     });
+
+    if (resultadoAnulacion.count !== 1) {
+      throw new AppError(
+        "La venta ya no se encuentra disponible para anulación",
+        409,
+      );
+    }
 
     await restituirStockVentaAnulada(venta.detalles, idVenta, tx);
     await auditarAnulacionVenta({ usuarioId: idUsuario, venta }, tx);

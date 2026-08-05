@@ -137,9 +137,70 @@ const validarEventoReservaMovimiento = (eventoReserva) => {
    HELPERS
 ========================================================= */
 
-// Obtiene el stock asociado a un producto.
-// Se incluye el producto para validar reglas dependientes de la unidad operativa.
-const obtenerStockPorProducto = async (productoId, tx = prisma) => {
+/* =========================================================
+   CONTROL DE CONCURRENCIA DEL INVENTARIO
+========================================================= */
+
+/*
+  Bloquea la fila de Stock correspondiente al producto mediante
+  SELECT ... FOR UPDATE dentro de la transacción activa.
+
+  ¿Qué problema evita?
+
+  Sin este bloqueo, dos operaciones simultáneas podrían:
+
+  1. leer el mismo stock disponible;
+  2. validar ambas contra ese valor anterior;
+  3. guardar resultados incompatibles o pisarse entre sí.
+
+  Ejemplo:
+  - quedan 5 g;
+  - una venta solicita 5 g;
+  - una reserva solicita 5 g al mismo tiempo.
+
+  Con el bloqueo:
+  - la primera operación obtiene la fila;
+  - la segunda espera;
+  - cuando continúa, vuelve a leer el stock ya actualizado;
+  - la validación se realiza sobre el valor real más reciente.
+
+  El bloqueo es por producto, no por toda la tabla. Por eso,
+  operaciones sobre productos distintos pueden continuar en paralelo.
+
+  La fila se libera automáticamente al confirmar o revertir
+  la transacción. Este helper siempre debe ejecutarse con el
+  cliente transaccional recibido por stockService.
+*/
+const bloquearFilaStockPorProducto = async (productoId, tx) => {
+  const filasBloqueadas = await tx.$queryRaw`
+    SELECT id
+    FROM "Stock"
+    WHERE producto_id = ${productoId}
+    FOR UPDATE
+  `;
+
+  if (filasBloqueadas.length === 0) {
+    throw new AppError("El producto no tiene stock asociado", 404);
+  }
+};
+
+/*
+  Obtiene el stock después de bloquear su fila.
+
+  El orden es intencional:
+
+  bloquear fila
+  → leer valores actuales
+  → validar
+  → actualizar
+  → registrar movimiento
+
+  De esta forma, todas las operaciones de inventario que utilizan
+  stockService quedan serializadas para un mismo producto.
+*/
+const obtenerStockBloqueadoPorProducto = async (productoId, tx) => {
+  await bloquearFilaStockPorProducto(productoId, tx);
+
   const stock = await tx.stock.findUnique({
     where: { producto_id: productoId },
     include: {
@@ -602,7 +663,7 @@ export const incrementarStock = async (
   const cantidadNumerica = validarCantidadPositiva(cantidad);
 
   const operacion = async (tx) => {
-    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+    const stockActual = await obtenerStockBloqueadoPorProducto(idProducto, tx);
 
     const stockActualizado = await tx.stock.update({
       where: { producto_id: idProducto },
@@ -639,7 +700,7 @@ export const descontarStock = async (
   const cantidadNumerica = validarCantidadPositiva(cantidad);
 
   const operacion = async (tx) => {
-    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+    const stockActual = await obtenerStockBloqueadoPorProducto(idProducto, tx);
 
     validarStockDisponible(stockActual, cantidadNumerica);
 
@@ -678,7 +739,7 @@ export const reservarStock = async (
   const cantidadNumerica = validarCantidadPositiva(cantidad);
 
   const operacion = async (tx) => {
-    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+    const stockActual = await obtenerStockBloqueadoPorProducto(idProducto, tx);
 
     validarStockDisponible(stockActual, cantidadNumerica);
 
@@ -741,7 +802,7 @@ export const liberarStockReservado = async (
   }
 
   const operacion = async (tx) => {
-    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+    const stockActual = await obtenerStockBloqueadoPorProducto(idProducto, tx);
 
     validarStockReservado(stockActual, cantidadNumerica);
 
@@ -788,7 +849,7 @@ export const consumirStockReservado = async (
   const cantidadNumerica = validarCantidadPositiva(cantidad);
 
   const operacion = async (tx) => {
-    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+    const stockActual = await obtenerStockBloqueadoPorProducto(idProducto, tx);
 
     validarStockReservado(stockActual, cantidadNumerica);
 
@@ -835,7 +896,7 @@ export const ajustarStock = async (
   const observacionesAjuste = validarObservacionesAjuste(observaciones);
 
   const operacion = async (tx) => {
-    const stockActual = await obtenerStockPorProducto(idProducto, tx);
+    const stockActual = await obtenerStockBloqueadoPorProducto(idProducto, tx);
 
     validarCantidadCompatibleConUnidad(stockActual.producto, variacionNumerica);
 

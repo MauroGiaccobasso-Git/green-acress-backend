@@ -11,7 +11,9 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "prisma:generate": "prisma generate",
-    "migrate:deploy": "prisma migrate deploy"
+    "migrate:deploy": "prisma migrate deploy",
+    "test": "npm run test:concurrency",
+    "test:concurrency": "node --env-file=.env.test --test --test-concurrency=1 tests/concurrency/stock.concurrency.test.js tests/concurrency/reservation-withdrawal.concurrency.test.js tests/concurrency/sales.concurrency.test.js"
   },
   "repository": {
     "type": "git",
