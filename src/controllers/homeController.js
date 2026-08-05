@@ -1,16 +1,30 @@
-// Controlador de la ruta principal.
-// Este archivo contiene la lógica que maneja las solicitudes HTTP
-// hacia la ruta raíz ("/") y otras rutas de prueba.
+import prisma from "../config/prisma.js";
 
-// Función que maneja la lógica de la ruta principal ("/")
-// Recibe la request (req) y envía una respuesta (res)
+// Respuesta de la ruta principal.
 export const getHome = (req, res) => {
-  // Envía una respuesta al cliente cuando accede a la ruta "/"
   res.send("Respuesta desde el controlador");
 };
 
-// Función que maneja una ruta de prueba
-// Permite validar que el backend está funcionando correctamente
+// Ruta simple para comprobar que Express responde.
 export const getTest = (req, res) => {
   res.send("Ruta de prueba funcionando");
+};
+
+// Comprueba que el backend y PostgreSQL estén funcionando.
+export const getHealth = async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+
+    res.status(200).json({
+      status: "ok",
+      database: "connected",
+    });
+  } catch (error) {
+    console.error("Error en el control de salud:", error);
+
+    res.status(503).json({
+      status: "error",
+      database: "disconnected",
+    });
+  }
 };

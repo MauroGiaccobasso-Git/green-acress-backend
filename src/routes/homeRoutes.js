@@ -1,23 +1,22 @@
-// Definición de las rutas del sistema.
-// Este archivo se encarga de asociar las URLs con los controladores correspondientes,
-// redirigiendo las solicitudes del usuario hacia la lógica que procesa cada petición.
-
-// Importa express para poder usar el sistema de rutas
+// Importa Express para crear las rutas.
 import express from "express";
 
-// Crea un router (objeto que maneja rutas)
+// Importa las funciones que responderán cada ruta.
+import {
+  getHealth,
+  getHome,
+  getTest,
+} from "../controllers/homeController.js";
+
 const router = express.Router();
 
-// Importa la función del controller
-import { getHome, getTest } from "../controllers/homeController.js";
-
-// Define la ruta GET para "/"
-// Cuando alguien accede a "/", se ejecuta getHome
+// Ruta principal.
 router.get("/", getHome);
 
-// Define la ruta GET para "/test"
-// Cuando alguien accede a "/test", se ejecuta la función getTest
+// Ruta de prueba básica.
 router.get("/test", getTest);
 
-// Exporta el router para poder usarlo en app.js
+// Comprueba que el backend y la base de datos funcionen.
+router.get("/health", getHealth);
+
 export default router;
