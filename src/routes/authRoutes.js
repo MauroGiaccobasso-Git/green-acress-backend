@@ -8,10 +8,7 @@ import {
   solicitarRecuperacion,
   restablecerPassword,
 } from "../controllers/authController.js";
-import {
-  verificarToken,
-  autorizarRoles,
-} from "../middlewares/authMiddleware.js";
+import { verificarToken } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
@@ -80,25 +77,5 @@ router.post("/restablecer-password", restablecerPassword);
   para incrementar la versión de sesión en la base de datos.
 */
 router.post("/logout", verificarToken, logout);
-
-/* =========================================================
-   RUTAS DE PRUEBA
-========================================================= */
-
-// Ruta protegida de prueba.
-router.get("/perfil", verificarToken, (req, res) => {
-  res.json({
-    message: "Acceso autorizado",
-    usuario: req.usuario,
-  });
-});
-
-// Ruta protegida de prueba solo para administradores.
-router.get("/admin", verificarToken, autorizarRoles("ADMIN"), (req, res) => {
-  res.json({
-    message: "Acceso autorizado para administrador",
-    usuario: req.usuario,
-  });
-});
 
 export default router;

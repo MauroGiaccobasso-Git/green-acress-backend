@@ -3,6 +3,28 @@ import { AppError } from "../utils/appError.js";
 import { registrarAuditoria } from "./auditoriaService.js";
 
 /* =========================================================
+   SELECTORES SEGUROS
+========================================================= */
+
+// Campos permitidos para el catálogo del Portal de Socios.
+// El identificador se utiliza únicamente para construir la solicitud
+// de reserva y no debe mostrarse visualmente en la interfaz.
+const productoPortalSocioSelect = {
+  id: true,
+  nombre: true,
+  descripcion: true,
+  imagen_url: true,
+  genetica: true,
+  porcentaje_thc: true,
+  precio_venta_actual: true,
+  stock: {
+    select: {
+      cantidad_disponible: true,
+    },
+  },
+};
+
+/* =========================================================
    VALIDACIONES GENERALES
 ========================================================= */
 
@@ -361,6 +383,18 @@ const construirDatosActualizacionProducto = (
   };
 };
 
+// Construye el contrato público utilizado por el Portal de Socios.
+const transformarProductoPortalSocio = (producto) => ({
+  id: producto.id,
+  nombre: producto.nombre,
+  genetica: producto.genetica,
+  porcentajeThc: Number(producto.porcentaje_thc),
+  descripcion: producto.descripcion,
+  precioPorGramo: Number(producto.precio_venta_actual),
+  imagen: producto.imagen_url,
+  cantidadDisponible: Number(producto.stock.cantidad_disponible),
+});
+
 /* =========================================================
    HELPERS DE PERSISTENCIA
 ========================================================= */
@@ -602,6 +636,35 @@ export const getOpcionesProductosCompra = async () => {
     imagen: producto.imagen_url,
     stock: producto.stock.cantidad_disponible,
   }));
+};
+
+/* =========================================================
+   CONSULTAS DEL PORTAL DE SOCIOS
+========================================================= */
+
+// Obtiene el catálogo público disponible para reservas.
+// Solo expone flores activas con precio válido y disponibilidad real mayor a cero.
+export const getProductosPortalSocio = async () => {
+  const productos = await prisma.producto.findMany({
+    where: {
+      tipo: "FLOR",
+      estado: "ACTIVO",
+      precio_venta_actual: {
+        gt: 0,
+      },
+      stock: {
+        is: {
+          cantidad_disponible: {
+            gt: 0,
+          },
+        },
+      },
+    },
+    select: productoPortalSocioSelect,
+    orderBy: [{ nombre: "asc" }, { id: "asc" }],
+  });
+
+  return productos.map(transformarProductoPortalSocio);
 };
 
 /* =========================================================

@@ -32,6 +32,17 @@ const ESTADOS_RESERVA_VALIDOS = [
   "FINALIZADA",
 ];
 
+const ESTADOS_RESERVA_ACTIVA_PORTAL = ["PENDIENTE", "CONFIRMADA"];
+
+const ETIQUETAS_ESTADO_RESERVA_PORTAL = {
+  PENDIENTE: "Procesando",
+  CONFIRMADA: "Lista para retirar",
+  RECHAZADA: "Rechazada",
+  CANCELADA: "Cancelada",
+  VENCIDA: "Vencida",
+  FINALIZADA: "Retirada",
+};
+
 /* =========================================================
    SELECTORES SEGUROS
 ========================================================= */
@@ -173,6 +184,47 @@ const reservaResumenSelect = {
   },
 };
 
+/**
+ * Selector público utilizado por el Portal de Socios.
+ *
+ * Conserva únicamente la información necesaria para presentar la reserva
+ * y evita exponer socios, administradores, auditorías o identificadores
+ * internos de detalles y productos.
+ */
+const reservaPortalSocioSelect = {
+  id: true,
+  fecha_solicitud: true,
+  fecha_limite_retiro: true,
+  estado: true,
+  total: true,
+
+  detalles: {
+    select: {
+      cantidad: true,
+      precio_unitario: true,
+      subtotal: true,
+
+      producto: {
+        select: {
+          nombre: true,
+          imagen_url: true,
+        },
+      },
+    },
+  },
+
+  historial: {
+    select: {
+      estado: true,
+      fecha: true,
+      observaciones: true,
+    },
+    orderBy: {
+      fecha: "asc",
+    },
+  },
+};
+
 /* =========================================================
    VALIDACIONES GENERALES
 ========================================================= */
@@ -283,8 +335,18 @@ const validarFechaFiltro = (fecha, campo) => {
 const obtenerSocioDesdeUsuario = async (usuarioId, tx = prisma) => {
   const usuario = await tx.usuario.findUnique({
     where: { id: usuarioId },
-    include: {
-      socio: true,
+    select: {
+      id: true,
+      rol: true,
+      estado: true,
+      socio: {
+        select: {
+          id: true,
+          nombre: true,
+          apellido: true,
+          estado: true,
+        },
+      },
     },
   });
 
@@ -293,18 +355,20 @@ const obtenerSocioDesdeUsuario = async (usuarioId, tx = prisma) => {
   }
 
   if (usuario.rol !== "SOCIO") {
-    throw new AppError("Solo los socios pueden solicitar reservas", 403);
-  }
-
-  if (usuario.estado !== "ACTIVO") {
-    throw new AppError("El usuario no se encuentra activo", 400);
+    throw new AppError(
+      "La operación está disponible únicamente para socios",
+      403,
+    );
   }
 
   if (!usuario.socio) {
     throw new AppError("El usuario no tiene un socio asociado", 400);
   }
 
-  return usuario.socio;
+  return {
+    usuario,
+    socio: usuario.socio,
+  };
 };
 
 const obtenerProductosPorIds = async (productosIds, tx = prisma) => {
@@ -360,6 +424,20 @@ const obtenerReservaParaCambioEstado = async (reservaId, tx = prisma) => {
 /* =========================================================
    VALIDACIONES DE NEGOCIO
 ========================================================= */
+
+const validarAccesoPortalSocio = ({ usuario, socio }) => {
+  const estadosSocioPermitidos = ["ACTIVO", "INACTIVO"];
+
+  if (
+    usuario.estado !== "ACTIVO" ||
+    !estadosSocioPermitidos.includes(socio.estado)
+  ) {
+    throw new AppError(
+      "El socio no se encuentra habilitado para acceder al portal",
+      403,
+    );
+  }
+};
 
 const validarSocioActivo = (socio) => {
   if (socio.estado !== "ACTIVO") {
@@ -637,6 +715,84 @@ const calcularFechaLimiteRetiro = () => {
   return fechaLimite;
 };
 
+// Obtiene la observación funcional correspondiente al estado actual.
+const obtenerObservacionEstadoActual = (reserva) => {
+  const historialEstadoActual = reserva.historial
+    .filter((registro) => registro.estado === reserva.estado)
+    .at(-1);
+
+  return String(historialEstadoActual?.observaciones ?? "").trim();
+};
+
+// Obtiene un motivo comprensible para estados de historial.
+const obtenerMotivoFuncionalReserva = (reserva) => {
+  const observacionEstadoActual = obtenerObservacionEstadoActual(reserva);
+
+  if (reserva.estado === "RECHAZADA") {
+    return (
+      observacionEstadoActual ||
+      "La reserva fue rechazada porque no cumplió las condiciones requeridas."
+    );
+  }
+
+  if (reserva.estado === "CANCELADA") {
+    return observacionEstadoActual || "La reserva fue cancelada por el club.";
+  }
+
+  if (reserva.estado === "VENCIDA") {
+    return "La reserva venció porque no fue retirada dentro del plazo establecido.";
+  }
+
+  return null;
+};
+
+// Construye el detalle público e histórico de un producto reservado.
+// Los importes provienen del detalle congelado de la reserva y no
+// del precio actual del producto.
+const transformarDetalleReservaPortal = (detalle) => ({
+  nombre: detalle.producto.nombre,
+  imagen: detalle.producto.imagen_url,
+  cantidad: Number(detalle.cantidad),
+  precioUnitario: Number(detalle.precio_unitario),
+  subtotal: Number(detalle.subtotal),
+});
+
+// Construye el contrato público de una reserva para el socio.
+const transformarReservaPortalSocio = (reserva) => {
+  const productos = reserva.detalles.map(transformarDetalleReservaPortal);
+
+  const totalGramos = productos.reduce(
+    (total, producto) => total + producto.cantidad,
+    0,
+  );
+
+  return {
+    id: reserva.id,
+    fechaSolicitud: reserva.fecha_solicitud,
+    fechaLimiteRetiro: reserva.fecha_limite_retiro,
+    estado: reserva.estado,
+    estadoDescripcion: ETIQUETAS_ESTADO_RESERVA_PORTAL[reserva.estado],
+    motivo: obtenerMotivoFuncionalReserva(reserva),
+    totalGramos,
+    total: Number(reserva.total),
+    productos,
+  };
+};
+
+// Separa las reservas vigentes del historial personal del socio.
+const construirReservasPortalSocio = (reservas) => {
+  const reservasTransformadas = reservas.map(transformarReservaPortalSocio);
+
+  return {
+    activas: reservasTransformadas.filter((reserva) =>
+      ESTADOS_RESERVA_ACTIVA_PORTAL.includes(reserva.estado),
+    ),
+    historial: reservasTransformadas.filter(
+      (reserva) => !ESTADOS_RESERVA_ACTIVA_PORTAL.includes(reserva.estado),
+    ),
+  };
+};
+
 /* =========================================================
    HELPERS DE NOTIFICACIONES
 ========================================================= */
@@ -776,6 +932,7 @@ const validarProcesamientoReserva = async ({
   socioId,
   detallesCalculados,
   gramosReserva,
+  fechaReferencia,
   tx,
 }) => {
   try {
@@ -786,6 +943,7 @@ const validarProcesamientoReserva = async ({
     await validarLimiteLegalMensual({
       socioId,
       gramosNuevaOperacion: gramosReserva,
+      fechaReferencia,
       tx,
     });
 
@@ -1051,41 +1209,47 @@ export const getReservaPorId = async (id) => {
 
 export const getReservasPorUsuarioSocio = async (usuarioId, filtros = {}) => {
   const idUsuario = validarIdUsuario(usuarioId);
-  const socio = await obtenerSocioDesdeUsuario(idUsuario);
+  const contextoSocio = await obtenerSocioDesdeUsuario(idUsuario);
+
+  validarAccesoPortalSocio(contextoSocio);
 
   const where = {
     ...construirFiltrosReservas(filtros),
-    socio_id: socio.id,
+    socio_id: contextoSocio.socio.id,
   };
 
-  return prisma.reserva.findMany({
+  const reservas = await prisma.reserva.findMany({
     where,
-    select: reservaSeguraSelect,
+    select: reservaPortalSocioSelect,
     orderBy: {
       fecha_solicitud: "desc",
     },
   });
+
+  return construirReservasPortalSocio(reservas);
 };
 
 export const getReservaPorIdUsuarioSocio = async (usuarioId, reservaId) => {
   const idUsuario = validarIdUsuario(usuarioId);
   const idReserva = validarIdReserva(reservaId);
 
-  const socio = await obtenerSocioDesdeUsuario(idUsuario);
+  const contextoSocio = await obtenerSocioDesdeUsuario(idUsuario);
+
+  validarAccesoPortalSocio(contextoSocio);
 
   const reserva = await prisma.reserva.findFirst({
     where: {
       id: idReserva,
-      socio_id: socio.id,
+      socio_id: contextoSocio.socio.id,
     },
-    select: reservaSeguraSelect,
+    select: reservaPortalSocioSelect,
   });
 
   if (!reserva) {
     throw new AppError("La reserva indicada no existe", 404);
   }
 
-  return reserva;
+  return transformarReservaPortalSocio(reserva);
 };
 
 export const solicitarReserva = async ({
@@ -1097,8 +1261,12 @@ export const solicitarReserva = async ({
   const detallesNormalizados = validarDetallesReserva(detalles);
 
   const reservaProcesada = await prisma.$transaction(async (tx) => {
-    const socio = await obtenerSocioDesdeUsuario(idUsuario, tx);
-    validarSocioActivo(socio);
+    const contextoSocio = await obtenerSocioDesdeUsuario(idUsuario, tx);
+
+    validarAccesoPortalSocio(contextoSocio);
+    validarSocioActivo(contextoSocio.socio);
+
+    const socio = contextoSocio.socio;
 
     const productosIds = detallesNormalizados.map(
       (detalle) => detalle.productoId,
@@ -1150,6 +1318,7 @@ export const solicitarReserva = async ({
       socioId: socio.id,
       detallesCalculados,
       gramosReserva,
+      fechaReferencia: reserva.fecha_solicitud,
       tx,
     });
 
@@ -1188,7 +1357,7 @@ export const solicitarReserva = async ({
     });
   }
 
-  return reservaProcesada;
+  return transformarReservaPortalSocio(reservaProcesada);
 };
 
 export const confirmarRetiroReserva = async ({

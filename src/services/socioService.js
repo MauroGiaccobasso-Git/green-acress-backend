@@ -10,6 +10,7 @@ import {
 import { generarPasswordTemporal } from "../utils/passwordUtils.js";
 import { registrarAuditoria } from "./auditoriaService.js";
 import { enviarPasswordTemporal } from "./email/emailService.js";
+import { calcularConsumoMensualSocio } from "./limiteLegalService.js";
 import {
   cancelarReservasActivasPorSocio,
   notificarCancelacionesReservasPorSuspension,
@@ -542,6 +543,24 @@ const construirCambiosSocio = (socioExistente, datosNormalizados) => {
   };
 };
 
+// Construye el contrato público del perfil del socio.
+// Se excluyen identificadores técnicos y datos administrativos internos.
+const construirPerfilSocio = (socio, consumoMensual) => ({
+  documento: socio.documento,
+  nombre: socio.nombre,
+  apellido: socio.apellido,
+  telefono: socio.telefono,
+  email: socio.usuario.email,
+  estado: socio.estado,
+  fecha_alta: socio.fecha_alta,
+  limite_legal_mensual: {
+    limite_gramos: consumoMensual.limiteLegal,
+    gramos_retirados: consumoMensual.gramosRetirados,
+    gramos_reservados: consumoMensual.gramosReservadosConfirmados,
+    gramos_disponibles: consumoMensual.gramosDisponibles,
+  },
+});
+
 /* =========================================================
    HELPERS DE AUDITORÍA
 ========================================================= */
@@ -936,11 +955,25 @@ export const cambiarEstadoSocio = async ({
    PERFIL Y CONSENTIMIENTO
 ========================================================= */
 
-// Consulta el perfil del socio autenticado sin exponer datos sensibles.
-export const obtenerPerfilSocio = async (usuarioId) => {
+// Consulta el perfil del socio autenticado sin exponer datos sensibles
+// ni información administrativa interna.
+export const obtenerPerfilSocio = async (
+  usuarioId,
+  fechaReferencia = new Date(),
+) => {
   const idUsuario = validarIdUsuario(usuarioId);
 
-  return obtenerSocioPorUsuarioId(idUsuario);
+  return prisma.$transaction(async (tx) => {
+    const socio = await obtenerSocioPorUsuarioId(idUsuario, tx);
+
+    const consumoMensual = await calcularConsumoMensualSocio(
+      socio.id,
+      fechaReferencia,
+      tx,
+    );
+
+    return construirPerfilSocio(socio, consumoMensual);
+  });
 };
 
 // Registra de forma atómica la aceptación del consentimiento

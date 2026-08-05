@@ -6,24 +6,112 @@ import { AppError } from "../utils/appError.js";
 ========================================================= */
 
 export const LIMITE_LEGAL_MENSUAL_GRAMOS = 40;
+export const ZONA_HORARIA_LIMITE_LEGAL = "America/Montevideo";
 
 /* =========================================================
    HELPERS DE FECHAS
 ========================================================= */
 
-// Obtiene el rango del mes calendario correspondiente a la fecha recibida.
-const obtenerRangoMes = (fechaReferencia = new Date()) => {
-  const inicioMes = new Date(
-    fechaReferencia.getFullYear(),
-    fechaReferencia.getMonth(),
-    1,
+const formateadorFechaMontevideo = new Intl.DateTimeFormat("en-US", {
+  timeZone: ZONA_HORARIA_LIMITE_LEGAL,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+// Normaliza y valida la fecha utilizada como referencia del período legal.
+const validarFechaReferencia = (fechaReferencia) => {
+  const fecha =
+    fechaReferencia instanceof Date
+      ? new Date(fechaReferencia.getTime())
+      : new Date(fechaReferencia);
+
+  if (Number.isNaN(fecha.getTime())) {
+    throw new AppError("La fecha de referencia es inválida", 400);
+  }
+
+  return fecha;
+};
+
+// Obtiene las partes de una fecha interpretadas en la zona horaria legal.
+const obtenerPartesFechaMontevideo = (fecha) => {
+  const partes = formateadorFechaMontevideo.formatToParts(fecha);
+
+  return partes.reduce((resultado, parte) => {
+    if (parte.type !== "literal") {
+      resultado[parte.type] = Number(parte.value);
+    }
+
+    return resultado;
+  }, {});
+};
+
+// Convierte una fecha local de Montevideo al instante UTC equivalente.
+const crearFechaUtcDesdeMontevideo = ({
+  year,
+  month,
+  day,
+  hour = 0,
+  minute = 0,
+  second = 0,
+}) => {
+  const objetivoLocalComoUtc = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour,
+    minute,
+    second,
+    0,
   );
 
-  const finMes = new Date(
-    fechaReferencia.getFullYear(),
-    fechaReferencia.getMonth() + 1,
-    1,
-  );
+  let instanteUtc = objetivoLocalComoUtc;
+
+  // Dos iteraciones contemplan también posibles cambios históricos de offset.
+  for (let intento = 0; intento < 2; intento += 1) {
+    const partesMontevideo = obtenerPartesFechaMontevideo(
+      new Date(instanteUtc),
+    );
+
+    const fechaMontevideoComoUtc = Date.UTC(
+      partesMontevideo.year,
+      partesMontevideo.month - 1,
+      partesMontevideo.day,
+      partesMontevideo.hour,
+      partesMontevideo.minute,
+      partesMontevideo.second,
+      0,
+    );
+
+    instanteUtc += objetivoLocalComoUtc - fechaMontevideoComoUtc;
+  }
+
+  return new Date(instanteUtc);
+};
+
+// Obtiene el rango UTC del mes calendario vigente en America/Montevideo.
+const obtenerRangoMes = (fechaReferencia = new Date()) => {
+  const fecha = validarFechaReferencia(fechaReferencia);
+  const { year, month } = obtenerPartesFechaMontevideo(fecha);
+
+  const siguienteMes = month === 12 ? 1 : month + 1;
+  const anioSiguienteMes = month === 12 ? year + 1 : year;
+
+  const inicioMes = crearFechaUtcDesdeMontevideo({
+    year,
+    month,
+    day: 1,
+  });
+
+  const finMes = crearFechaUtcDesdeMontevideo({
+    year: anioSiguienteMes,
+    month: siguienteMes,
+    day: 1,
+  });
 
   return { inicioMes, finMes };
 };
@@ -47,7 +135,7 @@ const validarIdSocio = (socioId) => {
 const validarGramosOperacion = (gramosNuevaOperacion) => {
   const gramos = Number(gramosNuevaOperacion);
 
-  if (Number.isNaN(gramos) || gramos <= 0) {
+  if (!Number.isFinite(gramos) || gramos <= 0) {
     throw new AppError("La cantidad a validar debe ser mayor a cero", 400);
   }
 
@@ -55,17 +143,20 @@ const validarGramosOperacion = (gramosNuevaOperacion) => {
 };
 
 /* =========================================================
-   CÁLCULO DE CONSUMO MENSUAL
+   HELPERS DE CÁLCULO
 ========================================================= */
 
-// Calcula los gramos efectivamente vendidos al socio en el mes calendario.
-const calcularGramosVendidosMes = async (
+const obtenerCantidadAgregada = (resultado) => {
+  return Number(resultado._sum.cantidad ?? 0);
+};
+
+// Calcula las ventas directas del período, excluyendo las generadas
+// desde una reserva para evitar computar dos veces el mismo consumo.
+const calcularGramosVentasDirectasMes = async (
   socioId,
-  fechaReferencia,
+  rangoMes,
   tx = prisma,
 ) => {
-  const { inicioMes, finMes } = obtenerRangoMes(fechaReferencia);
-
   const resultado = await tx.ventaDetalle.aggregate({
     _sum: { cantidad: true },
     where: {
@@ -73,8 +164,11 @@ const calcularGramosVendidosMes = async (
         socio_id: socioId,
         estado: "REGISTRADA",
         fecha: {
-          gte: inicioMes,
-          lt: finMes,
+          gte: rangoMes.inicioMes,
+          lt: rangoMes.finMes,
+        },
+        reserva: {
+          is: null,
         },
       },
       producto: {
@@ -83,26 +177,26 @@ const calcularGramosVendidosMes = async (
     },
   });
 
-  return resultado._sum.cantidad || 0;
+  return obtenerCantidadAgregada(resultado);
 };
 
-// Calcula los gramos comprometidos por reservas confirmadas del socio.
-const calcularGramosReservadosConfirmadosMes = async (
+// Calcula los gramos de reservas solicitadas durante el período
+// según el estado funcional recibido.
+const calcularGramosReservasMesPorEstado = async (
   socioId,
-  fechaReferencia,
+  estado,
+  rangoMes,
   tx = prisma,
 ) => {
-  const { inicioMes, finMes } = obtenerRangoMes(fechaReferencia);
-
   const resultado = await tx.reservaDetalle.aggregate({
     _sum: { cantidad: true },
     where: {
       reserva: {
         socio_id: socioId,
-        estado: "CONFIRMADA",
+        estado,
         fecha_solicitud: {
-          gte: inicioMes,
-          lt: finMes,
+          gte: rangoMes.inicioMes,
+          lt: rangoMes.finMes,
         },
       },
       producto: {
@@ -111,8 +205,12 @@ const calcularGramosReservadosConfirmadosMes = async (
     },
   });
 
-  return resultado._sum.cantidad || 0;
+  return obtenerCantidadAgregada(resultado);
 };
+
+/* =========================================================
+   CÁLCULO DE CONSUMO MENSUAL
+========================================================= */
 
 export const calcularConsumoMensualSocio = async (
   socioId,
@@ -120,28 +218,46 @@ export const calcularConsumoMensualSocio = async (
   tx = prisma,
 ) => {
   const idSocio = validarIdSocio(socioId);
+  const rangoMes = obtenerRangoMes(fechaReferencia);
 
-  const gramosVendidos = await calcularGramosVendidosMes(
-    idSocio,
-    fechaReferencia,
-    tx,
-  );
-
-  const gramosReservadosConfirmados =
-    await calcularGramosReservadosConfirmadosMes(
+  const [
+    gramosVentasDirectas,
+    gramosReservasConfirmadas,
+    gramosReservasFinalizadas,
+  ] = await Promise.all([
+    calcularGramosVentasDirectasMes(idSocio, rangoMes, tx),
+    calcularGramosReservasMesPorEstado(
       idSocio,
-      fechaReferencia,
+      "CONFIRMADA",
+      rangoMes,
       tx,
-    );
+    ),
+    calcularGramosReservasMesPorEstado(
+      idSocio,
+      "FINALIZADA",
+      rangoMes,
+      tx,
+    ),
+  ]);
 
-  const gramosConsumidos = gramosVendidos + gramosReservadosConfirmados;
+  const gramosRetirados =
+    gramosVentasDirectas + gramosReservasFinalizadas;
+  const gramosReservados = gramosReservasConfirmadas;
+  const gramosConsumidos = gramosRetirados + gramosReservados;
+
+  const gramosDisponibles = Math.max(
+    0,
+    LIMITE_LEGAL_MENSUAL_GRAMOS - gramosConsumidos,
+  );
 
   return {
     limiteLegal: LIMITE_LEGAL_MENSUAL_GRAMOS,
-    gramosVendidos,
-    gramosReservadosConfirmados,
+    gramosVendidos: gramosVentasDirectas,
+    gramosReservasFinalizadas,
+    gramosRetirados,
+    gramosReservadosConfirmados: gramosReservados,
     gramosConsumidos,
-    gramosDisponibles: LIMITE_LEGAL_MENSUAL_GRAMOS - gramosConsumidos,
+    gramosDisponibles,
   };
 };
 

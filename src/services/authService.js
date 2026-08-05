@@ -357,7 +357,11 @@ export const loginUsuario = async (email, password) => {
 
   const passwordValida = await bcrypt.compare(password, usuario.password_hash);
 
-  if (!passwordValida || usuario.estado !== "ACTIVO") {
+  const socioSinAcceso =
+    usuario.rol === "SOCIO" &&
+    (!usuario.socio || usuario.socio.estado === "SUSPENDIDO");
+
+  if (!passwordValida || usuario.estado !== "ACTIVO" || socioSinAcceso) {
     await registrarIntentoFallido(usuario.id, usuario.intentos_fallidos);
 
     lanzarErrorCredencialesInvalidas();
