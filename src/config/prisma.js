@@ -32,7 +32,15 @@ const adapter = new PrismaPg({
 });
 
 // Crea una instancia única de Prisma Client usando el adapter.
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient({
+  adapter,
+  ...(isAwsRds && {
+    transactionOptions: {
+      maxWait: 10000,
+      timeout: 20000,
+    },
+  }),
+});
 
 // Exporta Prisma para reutilizarlo en services, controllers y helpers.
 export default prisma;
